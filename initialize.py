@@ -11,7 +11,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from systemdynamics.cld import Extract
 from systemdynamics.sdm import SDM
-#from systemdynamics.plots import Plots
+from systemdynamics.plots import plot_simulated_interventions, plot_simulated_intervention_ranking, plot_simulated_data
 sns.set()
 
 if __name__ == "__main__":

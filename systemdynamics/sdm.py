@@ -8,6 +8,7 @@ import sympy as sym
 class SDM:
     def __init__(self, df_adj, interactions_matrix, t_eval, s):
         self.df_adj = df_adj
+        self.N = s.N
         self.interactions_matrix = interactions_matrix
         self.interaction_terms = s.interaction_terms
         self.solve_analytically = s.solve_analytically
@@ -23,7 +24,29 @@ class SDM:
         self.stocks = s.stocks
         self.max_parameter_value = s.max_parameter_value
         self.max_parameter_value_int = s.max_parameter_value_int
+        self.variable_of_interest = s.variable_of_interest
+        self.intervention_variables = s.intervention_variables
         self.test_vectorized_eqs()  # Call the test_vectorized_eqs function when the class is loaded
+
+    def get_intervention_effects(self, df_sol_per_sample, print_effects=True):
+        """ Obtain intervention effects from a dataframe with model simulation results.
+        """
+        # Create a dictionary with intervention effects on the variable of interest
+        intervention_effects = {i_v : [(df_sol_per_sample[n][i].loc[self.t_eval[-1], self.variable_of_interest] -
+                                df_sol_per_sample[n][i].loc[0, self.variable_of_interest]) 
+                                for n in range(self.N)] for i, i_v in enumerate(self.intervention_variables)}
+
+        # Sort the dictionary by the mean intervention effect
+        intervention_effects = dict(sorted(intervention_effects.items(),
+                                        key=lambda item: np.median(item[1]), reverse=True))
+
+        if print_effects:
+            print("Intervention effect on var of interest", self.variable_of_interest, "by:")
+            for i, i_v in enumerate(intervention_effects.keys()):
+                print("-", i_v, ":", round(np.mean(intervention_effects[i_v]), 2),
+                      "+- SD:", np.round(np.std(intervention_effects[i_v]), 2))
+    
+        return intervention_effects
 
     def sample_model_parameters(self, intervention_auxiliaries):
         """ Sample from the model parameters using a bounded uniform distribution. 
