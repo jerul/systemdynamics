@@ -6,15 +6,15 @@ from sympy.parsing.sympy_parser import parse_expr
 import sympy as sym
 
 class SDM:
-    def __init__(self, df_adj, interactions_matrix, t_eval, s):
+    def __init__(self, df_adj, interactions_matrix, s):
         self.df_adj = df_adj
         self.N = s.N
         self.interactions_matrix = interactions_matrix
         self.interaction_terms = s.interaction_terms
         self.solve_analytically = s.solve_analytically
         self.solver = s.solver
-        self.t_eval = t_eval
-        self.t_span = [t_eval[0], t_eval[-1]]
+        self.t_eval = s.t_eval
+        self.t_span = [s.t_eval[0], s.t_eval[-1]]
         self.stocks_and_auxiliaries = s.stocks_and_auxiliaries
         self.stocks_and_constants = s.stocks_and_constants
         self.constants = s.constants
