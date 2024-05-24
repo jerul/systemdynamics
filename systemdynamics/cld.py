@@ -150,4 +150,5 @@ class Extract:
         assert np.all(expected_interactions_matrix == self.interactions_matrix)
         assert np.all([x in self.variables for x in data["From"]])
         assert np.all([x in data["From"] for x in self.variables])
+        print("Test for loading KUMU table passed.")
     

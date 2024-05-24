@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from scipy.integrate import solve_ivp
+import scipy
 from copy import deepcopy
 from sympy.parsing.sympy_parser import parse_expr
 import sympy as sym
@@ -26,7 +27,15 @@ class SDM:
         self.max_parameter_value_int = s.max_parameter_value_int
         self.variable_of_interest = s.variable_of_interest
         self.intervention_variables = s.intervention_variables
+
+        # Run tests
         self.test_vectorized_eqs()  # Call the test_vectorized_eqs function when the class is loaded
+
+        if s.interaction_terms == 0:
+            self.test_with_linear_model()  # Test whether analytical solution and numerical solution match
+
+        if s.setting_name == "Sleep" and s.variable_of_interest == "Depressive_symptoms":
+            self.test_with_sleep_depression_model() # Call the test_with_sleep_depression_model function when the class is loaded
 
     def get_intervention_effects(self, df_sol_per_sample, print_effects=True):
         """ Obtain intervention effects from a dataframe with model simulation results.
@@ -48,7 +57,7 @@ class SDM:
     
         return intervention_effects
 
-    def sample_model_parameters(self, intervention_auxiliaries):
+    def sample_model_parameters(self, intervention_auxiliaries=None):
         """ Sample from the model parameters using a bounded uniform distribution. 
             The possible parameters are given by the adjacency and interactions matrices.
         """
@@ -167,29 +176,35 @@ class SDM:
                                 method=self.solver, rtol=1e-6, atol=1e-6)
         else:  # Linear system
             if self.solve_analytically: 
-                A_inv = np.linalg.pinv(A)  # Pseudo-inverse for singular matrices
-                I = np.identity(A.shape[0])
-                solution = self.analytical_solution(self.t_eval[:, None], x0, A, b, A_inv, I).T
+                solution = self.analytical_solution(self.t_eval[:, None], x0, A, b).T
             else:
                 solution = solve_ivp(self.solve_sdm_linear, self.t_span, x0, args=(A, b),
                                    t_eval=self.t_eval, jac=self.jac_linear,
-                                   method=self.solver, rtol=1e-6, atol=1e-6)
+                                   method=self.solver, rtol=1e-6, atol=1e-6).y
 
-        df_sol = pd.DataFrame(solution.y.T, columns=self.stocks_and_constants, index=self.t_eval)
+        df_sol = pd.DataFrame(solution.T, columns=self.stocks_and_constants, index=self.t_eval)
         df_sol["Time"] = df_sol.index
 
         params_wo_stocks = {var : self.new_params[var] for var in self.auxiliaries}
         df_sol_with_aux = self.evaluate_auxiliaries(params_wo_stocks, df_sol, self.t_eval)
         return df_sol_with_aux
 
-    def analytical_solution(self, t, x0, A, b, A_inv, I):
+    def analytical_solution(self, t, x0, A, b):
         """ Analytical solution for a linear system of ODEs.
         Note this solution only works for non-singular matrices.
         That is, it only works without constant variables because these introduce rows/columns of zero in matrix A.
         """
-        exp_At = np.linalg.expm(A * t)
-        return np.matmul((exp_At - I), np.matmul(A_inv, b)) + np.matmul(exp_At, x0)
-
+        A_inv = np.linalg.pinv(A)  # Pseudo-inverse for singular matrices
+        I = np.identity(A.shape[0])
+        A_inv_b = np.matmul(A_inv, b)
+        sol = np.zeros((self.t_eval.shape[0], x0.shape[0]))
+        for i, t in enumerate(self.t_eval):
+            exp_At = scipy.linalg.expm(A * t)
+            sol[i, :] = np.matmul((exp_At - I), A_inv_b) + np.matmul(exp_At, x0)
+        return sol
+        #exp_At = scipy.linalg.expm(A * t)
+        #return np.matmul((exp_At - I), np.matmul(A_inv, b)) + np.matmul(exp_At, x0)
+    
     def solve_sdm(self, t, x, A, K, b):
         """ Solve the system of differential equations representing the SDM.
         x: vector containing the stock and constant variables
@@ -291,3 +306,71 @@ class SDM:
 
         #assert ((df_sol_per_sample[-1][-1]-df_sol_test)**2).sum().sum() < 1e-15 # Check if the solutions are the same
         assert np.allclose(sol_test.y, solution.y)
+        print("Test comparison with vectorized implementation passed.")
+
+    def f_manual(self, time, x, params):
+        """ Manual equations for the Sleep example for testing purposes.
+        """
+        # Auxiliaries
+        p_a = (x[self.stocks_and_constants.index("Depressive_symptoms")] * params["Physical_activity"]["Depressive_symptoms"] + 
+                params["Physical_activity"]["Intercept"])# Physical activity
+        p_p = (x[self.stocks_and_constants.index("Depressive_symptoms")] * params["Proinflammatory_processes"]["Depressive_symptoms"] + 
+                p_a * params["Proinflammatory_processes"]["Physical_activity"] +
+                x[self.stocks_and_constants.index("Body_fat")] * params["Proinflammatory_processes"]["Body_fat"] +
+                x[self.stocks_and_constants.index("Perceived_stress")] * params["Proinflammatory_processes"]["Perceived_stress"] +
+                params["Proinflammatory_processes"]["Intercept"]) # Proinflammatory processes
+        s_p = (x[self.stocks_and_constants.index("Body_fat")] * params["Sleep_problems"]["Body_fat"] + 
+                x[self.stocks_and_constants.index("Perceived_stress")] * params["Sleep_problems"]["Perceived_stress"] +
+                p_p * params["Sleep_problems"]["Proinflammatory_processes"] + params["Sleep_problems"]["Intercept"]) # Sleep problems
+        
+        # print("Auxiliaries: ", p_a, p_p, s_p)
+
+        # Stocks, order: Depressive_symptoms, Childhood_adversity, Body_fat, Perceived_stress, Treatment
+        d_s = (s_p * params["Depressive_symptoms"]["Sleep_problems"] + 
+                x[self.stocks_and_constants.index("Childhood_adversity")] * params["Depressive_symptoms"]["Childhood_adversity"] +
+                x[self.stocks_and_constants.index("Perceived_stress")] * params["Depressive_symptoms"]["Perceived_stress"] +
+                x[self.stocks_and_constants.index("Treatment")] * params["Depressive_symptoms"]["Treatment"] + 
+        p_p * params["Depressive_symptoms"]["Proinflammatory_processes"] + params["Depressive_symptoms"]["Intercept"])  # Depressive symptoms
+        c_a = 0  # Childhod adversity
+        b_f = (s_p * params["Body_fat"]["Sleep_problems"] + 
+                p_a * params["Body_fat"]["Physical_activity"] + params["Body_fat"]["Intercept"])  # Body fat
+        if self.interaction_terms:
+            b_f += s_p * p_a * params["Body_fat"]["Physical_activity * Sleep_problems"]
+        p_s = (s_p * params["Perceived_stress"]["Sleep_problems"] +
+                x[self.stocks_and_constants.index("Depressive_symptoms")] * params["Perceived_stress"]["Depressive_symptoms"] +
+                x[self.stocks_and_constants.index("Childhood_adversity")] * params["Perceived_stress"]["Childhood_adversity"] + 
+                params["Perceived_stress"]["Intercept"])  # Perceived stress'
+        t_m = (x[self.stocks_and_constants.index("Depressive_symptoms")] * params["Treatment"]["Depressive_symptoms"] + 
+                params["Treatment"]["Intercept"]) # Treatment
+        return np.array([d_s, c_a, b_f, p_s, t_m])
+
+    def test_with_sleep_depression_model(self):
+        """ Test whether the vectorized equations are the same as the manually implemented equations.
+        """
+        self.params = self.sample_model_parameters([])  # Sample model parameters
+        self.new_params = self.make_equations_auxiliary_independent()  # Remove auxiliaries from the equations
+        A, K, b = self.get_A_and_K_matrices()  # Get A and K matrices and intercept vector from the parameter dictionary without auxiliaries
+
+        x0 = np.ones(len(self.stocks_and_constants), order='F') * 0.01  
+        solution = solve_ivp(self.solve_sdm, self.t_span, x0, args=(A, K, b),
+                                t_eval=self.t_eval, method=self.solver, rtol=1e-6, atol=1e-6)
+        
+        sol_test = solve_ivp(self.f_manual, self.t_span, x0, args=(self.params,), 
+                                t_eval=self.t_eval, method=self.solver, rtol=1e-6, atol=1e-6)
+        assert np.allclose(sol_test.y, solution.y)
+        print("Test comparison with manual implementation for Sleep example passed.")
+
+    #### Compare the results to straightforward implementation of equations
+    def test_with_linear_model(self):
+        """ Test whether the algebraic solution is similar to the numerical solution.
+        """
+        self.params = self.sample_model_parameters([])  # Sample model parameters
+        self.new_params = self.make_equations_auxiliary_independent()  # Remove auxiliaries from the equations
+        A, K, b = self.get_A_and_K_matrices()  # Get A and K matrices and intercept vector from the parameter dictionary without auxiliaries
+
+        x0 = np.ones(len(self.stocks_and_constants), order='F') * 0.01  
+        solution = solve_ivp(self.solve_sdm, self.t_span, x0, args=(A, K, b),
+                                t_eval=self.t_eval, method=self.solver, rtol=1e-12, atol=1e-12)
+        analytical_solution = self.analytical_solution(self.t_eval[:, None], x0, A, b).T
+        assert np.allclose(analytical_solution, solution.y)
+        print("Test comparison analytic and numerical solution for linear model passed.")

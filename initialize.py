@@ -19,7 +19,7 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:  # Settings passed from Jupyter
         system_argument = sys.argv[1]
 
-    if "Results/" in system_argument:  # When loading posterior samples
+    if "Results/" in system_argument: 
         # Set folder path to current folder
         curr_time = "_".join(system_argument.split("/")[-1].split("_")[:3])
         setting_name = "_".join(
@@ -29,13 +29,15 @@ if __name__ == "__main__":
             settings = json.load(f)
 
         s = SimpleNamespace(**settings)
+        s.setting_name = setting_name
 
-    else:  # When running new estimation
+    else:  # Load settings from the Settings folder
         setting_name = system_argument
+
         with open('Settings/'+setting_name+'.json') as f:
             settings = json.load(f)
         s = SimpleNamespace(**settings)
-
+        s.setting_name = setting_name
         curr_time = (str(datetime.datetime.now())[0:10] + "_" +
                      str(datetime.datetime.now())[11:13] + "_" +
                      str(datetime.datetime.now())[14:16])
