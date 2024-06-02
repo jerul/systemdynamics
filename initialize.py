@@ -5,6 +5,7 @@ import scipy
 from tqdm import tqdm 
 import json
 from types import SimpleNamespace
+from copy import deepcopy
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -82,7 +83,8 @@ if __name__ == "__main__":
     s.stocks_and_auxiliaries = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var] in ['stock', 'auxiliary']]
     s.var_to_type = {var.replace(" ", "_") : var_to_type_init[var] for var in variable_names}
     s.variable_of_interest = "_".join(s.variable_of_interest.split(" "))  # Ensure the variable of interest is formulated with underscores
-
+    s.simulate_interventions = True  # Always simulate interventions
+    
     # Create dataframe with adjacency matrix
     df_adj = pd.DataFrame(adjacency_matrix,
                           columns=s.variables, index=s.variables) 

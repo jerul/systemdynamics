@@ -37,7 +37,7 @@ def plot_simulated_data(df_pred, title, s):
             lb_confs_at_time_t = []
             ub_confs_at_time_t = []
 
-            for t in t_eval:
+            for t in s.t_eval:
                 label_avg = "Mean"
                 samples_at_time_t = [df_pred[i].loc[t, var] for i in range(s.N)]
 
@@ -56,8 +56,8 @@ def plot_simulated_data(df_pred, title, s):
                     lb_confs_at_time_t.append(np.percentile(samples_at_time_t, lower_percentile))
                     ub_confs_at_time_t.append(np.percentile(samples_at_time_t, upper_percentile))
 
-            ax[k].plot(t_eval, avg_at_time_t, label=label_avg)
-            ax[k].fill_between(t_eval, lb_confs_at_time_t, ub_confs_at_time_t,
+            ax[k].plot(s.t_eval, avg_at_time_t, label=label_avg)
+            ax[k].fill_between(s.t_eval, lb_confs_at_time_t, ub_confs_at_time_t,
                                alpha=.3, label=str(int(s.confidence_bounds*100)) + "% CI") #Confidence interval")
         else:
             for i, data_i, in enumerate(df_pred):
@@ -223,7 +223,7 @@ def plot_simulated_intervention_ranking(intervention_effects, s):
    plt.title("Effect on " + " ".join(s.variable_of_interest.split("_")))
    plt.xlabel("Standardized effect after " + str(s.t_end) + " " + s.time_unit)
    plt.ylabel("")
-   ax.invert_xaxis()
+   # ax.invert_xaxis()
 
 
 # plt.figure()

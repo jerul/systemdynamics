@@ -5,6 +5,8 @@ import scipy
 from copy import deepcopy
 from sympy.parsing.sympy_parser import parse_expr
 import sympy as sym
+import networkx as nx
+# from types import SimpleNamespace
 
 class SDM:
     def __init__(self, df_adj, interactions_matrix, s):
@@ -30,12 +32,14 @@ class SDM:
 
         # Run tests
         self.test_vectorized_eqs()  # Call the test_vectorized_eqs function when the class is loaded
+        self.test_get_link_scores()  # Call the test_get_link_scores function when the class is loaded
 
         if s.interaction_terms == 0:
             self.test_with_linear_model()  # Test whether analytical solution and numerical solution match
 
         if s.setting_name == "Sleep" and s.variable_of_interest == "Depressive_symptoms":
             self.test_with_sleep_depression_model() # Call the test_with_sleep_depression_model function when the class is loaded
+
 
     def get_intervention_effects(self, df_sol_per_sample, print_effects=True):
         """ Obtain intervention effects from a dataframe with model simulation results.
@@ -260,6 +264,107 @@ class SDM:
         return A
 
 
+    def get_link_scores(self, df_i, params):
+        """ Get the link scores for the Loops That Matter method.
+        """
+        linkscores = {t : {} for t in self.t_eval[1:]}
+
+        for i in range(len(self.t_eval)-1):  # For all time steps
+            current_t = self.t_eval[i + 1]
+            previous_t = self.t_eval[i]
+            t = current_t
+            linkscores[current_t] = {k : {g : -999 for g in params[k] if g != "Intercept"} for k in params}
+        
+            for target in self.stocks_and_auxiliaries:  # For all stocks and auxiliaries
+                target_value = df_i.loc[current_t, target]
+                target_previous_value = df_i.loc[previous_t, target]
+                if target in self.stocks:
+                    sum_of_flows = 0
+                    for source in linkscores[t][target]:
+                        source_previous_value = df_i.loc[previous_t, source]
+                        if params[target][source] > 0:  # Inflow [TODO: Ensure that also variables that only an interaction term are included here]
+                            sum_of_flows += source_previous_value
+                        else:  # Outflow
+                            sum_of_flows -= source_previous_value
+
+                    for source in linkscores[t][target]:
+                        source_previous_value = df_i.loc[previous_t, source]
+                        if sum_of_flows == 0:
+                            linkscores[t][target][source] = 0
+                        elif params[target][source] > 0:  # Inflow
+                            linkscores[t][target][source] = -np.abs(source_previous_value/sum_of_flows)
+                        else:  # Outflow
+                            linkscores[t][target][source] = np.abs(source_previous_value/sum_of_flows)
+                
+                elif target_value == target_previous_value:  # No change, thus remains constant
+                    for source in linkscores[t][target]:
+                        linkscores[t][target][source] = 0
+                
+                else:  # Auxiliary
+                    for source in linkscores[t][target]:
+                        source_value = df_i.loc[current_t, source]
+                        source_previous_value = df_i.loc[previous_t, source]
+                
+                        # Determine what the value for target would have been this if only the source changed
+                        ## Previous value + (source value - previous source value) * parameter
+                        t_respect_source = target_previous_value + (source_value - source_previous_value) * params[target][source]
+                        delta_t_respect_to_s = t_respect_source - target_previous_value
+                        delta_source = source_value - source_previous_value
+                        sign = 1
+                        if delta_source != 0 and delta_t_respect_to_s != 0:
+                            sign = np.sign(delta_t_respect_to_s / delta_source)
+
+                        linkscores[t][target][source] = np.abs(delta_t_respect_to_s / (target_value - target_previous_value)) * sign
+
+        return linkscores
+
+    def get_loop_scores(self, linkscores):
+        """ For each loop, estimate the total loop score which is the multiplication of all the linkscores in the loop 
+        """
+        # Create a DiGraph from the adjacency matrix
+        G = nx.DiGraph(self.df_adj)
+        feedback_loops = list(nx.simple_cycles(G))
+        # feedback_loops = [loop for loop in feedback_loops if len(loop) > 1]  # Optional: Omit self-cycles
+
+        t_eval_loops = self.t_eval[1:]
+
+        while True:
+            try:                
+                loopscores = {}
+                for loop in feedback_loops:
+                    loop_name = ", ".join(loop)
+                    loopscores[loop_name] = []
+                    #print(loop)
+                    close_loop = loop + [loop[0]]  # Add first element at the end again to close the loop
+                    link_scores_per_loop = []
+
+                    for t in t_eval_loops:
+                        for i in range(len(close_loop)-1):
+                            assert self.df_adj.loc[close_loop[i], close_loop[i+1]] != 0  # There must be a link between the two nodes
+                            link_scores_per_loop += [linkscores[t][close_loop[i]][close_loop[i+1]]]
+                        
+                        loop_score = np.prod(link_scores_per_loop)
+                        loopscores[loop_name] += [loop_score]  # Loop score per time
+
+                    #print("Link scores:", link_scores_per_loop, "Loop score:", loop_score,"\n")
+
+                ### Finally, normalize the loop scores by taking the loop score divided by the sum of all loop scores
+                normalizing_constants = [np.sum([loopscores[ls][i] for ls in loopscores]) for i in range(len(t_eval_loops))]
+
+                for i in range(len(t_eval_loops)):
+                    for ls in loopscores:
+                        loopscores[ls][i] = loopscores[ls][i] / normalizing_constants[i]
+
+                assert abs(np.mean([sum([loopscores[ls][i] for ls in loopscores]) for i in range(len(t_eval_loops))])-1) < 1e-10
+
+            except:
+                t_eval_loops = self.t_eval[2:]  # This is needed for interventions on constants or stocks that are only in a balancing loop
+                # print("Except was used for loop score calculation. Now running from timestep 2 instead of 1.")
+                continue
+            break  # Break the loop if no except occurs
+
+        return loopscores, feedback_loops
+
 
 ### TESTING ###
     def f_no_aux(self, time, x, params_wo_auxiliaries):
@@ -374,3 +479,50 @@ class SDM:
         analytical_solution = self.analytical_solution(self.t_eval[:, None], x0, A, b).T
         assert np.allclose(analytical_solution, solution.y)
         print("Test comparison analytic and numerical solution for linear model passed.")
+
+    def test_get_link_scores(self):
+        """ Test the get_link_scores function with the test data from the Loops that matter paper (Table 1)
+        https://onlinelibrary.wiley.com/doi/full/10.1002/sdr.1658
+
+        Table 1:
+        variable / time 1 / time 2 / variable change / partial change in z / link score magnitude
+        x / 5 / 7 / 2 / 4 / (4/5)
+        y / 4 / 5 / 1 / 1 / (1/5)
+        z / 14 / 19 / 5 / - / -
+        """
+        # Define the parameters for the test based on Table 1
+        test_params = {
+            "Z": {"X": 2, "Y": 1},
+            "X": {"b_x": 2},
+            "Y": {"b_y": 1}
+        }
+        # Store original values
+        original_t_eval = self.t_eval
+        original_stocks_and_auxiliaries = self.stocks_and_auxiliaries
+        original_stocks = self.stocks
+
+        self.t_eval = [1, 2]  # Time steps
+        self.stocks_and_auxiliaries = ["X", "Y", "Z"]
+        self.stocks = []
+
+        # Create the DataFrame for the test
+        df_test_loops = pd.DataFrame({
+            "X": [5, 7],
+            "Y": [4, 5],
+            "b_x" : [2, 2],
+            "b_y" : [1, 1],
+            "Z": [14, 19]
+        }, index=self.t_eval)
+
+        # Call the get_link_scores function with the test data
+        link_scores = self.get_link_scores(df_test_loops, test_params)
+
+        # Verify the results
+        # print(link_scores)
+        assert link_scores[self.t_eval[-1]]["Z"]["X"] == 4/5
+        assert link_scores[self.t_eval[-1]]["Z"]["Y"] == 1/5
+
+        # Return original values
+        self.t_eval = original_t_eval
+        self.stocks_and_auxiliaries = original_stocks_and_auxiliaries
+        self.stocks = original_stocks

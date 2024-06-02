@@ -7,7 +7,6 @@
         "max_parameter_value" : 0.2,
         "max_parameter_value_int" : 0.1,
         "solve_analytically" : 1,
-        "simulate_interventions" : 1,
         "interaction_terms" : 0,
         "save_results" : 0
 }
