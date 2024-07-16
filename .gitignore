@@ -1,3 +1,4 @@
+.conda/
 venv/
 
 # Byte-compiled / optimized / DLL files
