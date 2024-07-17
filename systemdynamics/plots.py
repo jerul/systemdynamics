@@ -6,7 +6,7 @@ import scipy.stats
 import pandas as pd
 import ipywidgets as widgets
 from IPython.display import display
-sns.set()
+sns.set_theme()
 
 def plot_simulated_data(df_pred, title, s):
     """

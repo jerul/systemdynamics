@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import numpy as np
 from openpyxl import load_workbook
@@ -10,6 +11,7 @@ class Extract:
         self.adjacency_matrix = None
         self.interactions_matrix = None
         self.test_extraction()  # Call the test_extraction function when the class is loaded
+
 
     def extract_adjacency_matrix(self):
         """Extract the adjacency matrix from an Excel table exported from Kumu (Kumu.io).
@@ -93,7 +95,6 @@ class Extract:
         return self.variables, self.var_to_type, self.adjacency_matrix, self.interactions_matrix
 
 
-
 ### TESTING ###
     def test_extraction(self):
         """Test the CLD extraction by creating an examplar Kumu table and comparing the results."""
@@ -118,7 +119,10 @@ class Extract:
 
         # Save the evidence table to an Excel file
         original_file_path = self.file_path
-        test_file_path = "../test_files/evidence_table.xlsx"
+        test_file_path = os.path.join(os.path.dirname(__file__), '..', 'test_files', 'evidence_table.xlsx')
+
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(test_file_path), exist_ok=True)
 
         with pd.ExcelWriter(test_file_path) as writer:
             df_e.to_excel(writer, sheet_name='Elements', index=False)

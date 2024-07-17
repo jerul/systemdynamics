@@ -13,20 +13,19 @@ import matplotlib.pyplot as plt
 from systemdynamics.cld import Extract
 from systemdynamics.sdm import SDM
 from systemdynamics.plots import plot_simulated_interventions, plot_simulated_intervention_ranking, plot_simulated_data, plot_simulated_interventions_compare
-sns.set()
+sns.set_theme()
 
 if __name__ == "__main__":
     # Assing setting has input to load the setting (sys.argv[1])
     if len(sys.argv) > 1:  # Settings passed from Jupyter
         system_argument = sys.argv[1]
 
-    if "Results/" in system_argument: 
+    if "Results" in system_argument: 
         # Set folder path to current folder
-        curr_time = "_".join(system_argument.split("/")[-1].split("_")[:3])
-        setting_name = "_".join(
-            system_argument.split("/")[1:][0].split("_")[3:])
+        curr_time = "_".join(os.path.basename(system_argument).split("_")[:3])
+        setting_name = "_".join(os.path.basename(system_argument).split("_")[3:])
 
-        with open(system_argument + "/used_settings_" + setting_name + '.json') as f:
+        with open(os.path.join(system_argument, f"used_settings_{setting_name}.json")) as f:
             settings = json.load(f)
 
         s = SimpleNamespace(**settings)
@@ -35,7 +34,11 @@ if __name__ == "__main__":
     else:  # Load settings from the Settings folder
         setting_name = system_argument
 
-        with open('Settings/'+setting_name+'.json') as f:
+        # Construct the file path
+        settings_path = os.path.join(os.path.dirname(__file__), 'Examples','Settings', f'{setting_name}.json')
+
+
+        with open(settings_path) as f:
             settings = json.load(f)
         s = SimpleNamespace(**settings)
         s.setting_name = setting_name
@@ -44,20 +47,23 @@ if __name__ == "__main__":
                      str(datetime.datetime.now())[14:16])
 
         if s.save_results:  # Create a directory to store results
-            folder_path = os.path.join(
-                os.getcwd(), "Results/" + curr_time + '_' + setting_name)
+            folder_path = folder_path = os.path.join(os.getcwd(), 'Examples',"Results", f"{curr_time}_{setting_name}")
             
             if not os.path.exists(folder_path):
                 os.mkdir(folder_path)
 
-            with open("Results/" + curr_time + '_' + setting_name + "/used_settings_" + setting_name +
-                      '.json', 'w+') as f:
+            #with open("Results/" + curr_time + '_' + setting_name + "/used_settings_" + setting_name +
+            #          '.json', 'w+') as f:
+            #    json.dump(settings, f, indent=2)  # Store current settings
+
+
+            with open(os.path.join(folder_path, f"used_settings_{setting_name}.json"), 'w+') as f:
                 json.dump(settings, f, indent=2)  # Store current settings
 
     # Get the SDM structure from the CLD
 
     # Load the adjacency matrix based on the Kumu table
-    file = "Kumu/" + setting_name + ".xlsx"
+    file = os.path.join(os.path.dirname(__file__), 'Examples',"Kumu", f"{setting_name}.xlsx")
     extract = Extract(file)  # Load the relevant Kumu file extraction module
 
     # Load the adjacency matrix from the KUmu file
