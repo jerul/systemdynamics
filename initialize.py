@@ -47,7 +47,7 @@ if __name__ == "__main__":
                      str(datetime.datetime.now())[14:16])
 
         if s.save_results:  # Create a directory to store results
-            folder_path = folder_path = os.path.join(os.getcwd(), 'Examples',"Results", f"{curr_time}_{setting_name}")
+            folder_path = os.path.join(os.getcwd(),"Results", f"{curr_time}_{setting_name}")
             
             if not os.path.exists(folder_path):
                 os.mkdir(folder_path)
