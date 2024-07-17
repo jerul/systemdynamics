@@ -84,7 +84,7 @@ def plot_simulated_interventions_compare(df_sol_per_sample, s):
     """
     # Create widgets
     confidence_bounds_slider = widgets.FloatSlider(value=0.95, min=0.01, max=0.99, step=0.01, description='Interval bounds:')
-    variable_selector = widgets.SelectMultiple(options=s.intervention_variables, value=['Body_fat', 'Sleep_problems'], description='Variables:')
+    variable_selector = widgets.SelectMultiple(options=s.intervention_variables, value=s.intervention_variables[:2], description='Variables:')
         #options=["Sleep_problems", "Body_fat", "Other_var1", "Other_var2"], value=["Sleep_problems", "Body_fat"], description='Variables:')
 
     # Update plot function
