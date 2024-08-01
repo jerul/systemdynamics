@@ -81,9 +81,9 @@ if __name__ == "__main__":
             s.interaction_terms = False
    
     # Load variable names and automatically fill any spaces with underscores
-    s.stocks = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var] == 'stock']
-    s.auxiliaries = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var] == 'auxiliary']
-    s.constants = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var] == 'constant']
+    s.stocks = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var].lower() == 'stock']
+    s.auxiliaries = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var].lower() == 'auxiliary']
+    s.constants = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var].lower() == 'constant']
     s.variables = [var.replace(" ", "_") for var in variable_names]  # s.auxiliaries + s.stocks + s.constants
     s.stocks_and_constants = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var] in ['stock', 'constant']]
     s.stocks_and_auxiliaries = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var] in ['stock', 'auxiliary']]
