@@ -129,20 +129,12 @@ def plot_simulated_interventions_compare(df_sol_per_sample, s):
     # Display widgets and plot
     return widgets.interactive(update_plot, confidence_bounds=confidence_bounds_slider, compare_int_vars=variable_selector)
     
-def plot_simulated_interventions(df_sol_per_sample, title, s):
+def plot_simulated_interventions(df_sol_per_sample, top_vars_plot, title, s):
     """
-    Plot the simulated interventions.
-
-    Parameters:
-    - df_sol_per_sample: DataFrame containing the simulated data.
-    - title: Title of the plot.
-    - s: Object containing system information.
-
-    Returns:
-    - None (Displays the plot).
+    Plot the simulated interventions over time
     """
 
-    num_plots = len(s.intervention_variables)
+    num_plots = len(top_vars_plot)
     num_rows = int(np.ceil(num_plots / 3))
 
     fig, axs = plt.subplots(num_rows, 3, figsize=(12, 4 * num_rows))
@@ -151,7 +143,10 @@ def plot_simulated_interventions(df_sol_per_sample, title, s):
 
     ax = axs.flatten()
 
-    for k, var in enumerate(s.intervention_variables):
+    #max_value = max([max([df_sol_per_sample[i][j][s.variable_of_interest].max() for i in range(s.N)]) for j in range(len(s.intervention_variables))])
+    #min_value = min([min([df_sol_per_sample[i][j][s.variable_of_interest].min() for i in range(s.N)]) for j in range(len(s.intervention_variables))])
+
+    for k, var in enumerate(top_vars_plot):
         if s.interval_type != "spaghetti":
             avg_at_time_t = []
             lb_confs_at_time_t = []
@@ -176,7 +171,7 @@ def plot_simulated_interventions(df_sol_per_sample, title, s):
                     upper_percentile = (1 + s.confidence_bounds) / 2 * 100
                     lb_confs_at_time_t.append(np.percentile(samples_at_time_t, lower_percentile))
                     ub_confs_at_time_t.append(np.percentile(samples_at_time_t, upper_percentile))
-                    
+    
             ax[k].plot(s.t_eval, avg_at_time_t, label=label_avg)
             ax[k].fill_between(s.t_eval, lb_confs_at_time_t, ub_confs_at_time_t,
                                 alpha=.3, label=str(int(s.confidence_bounds*100)) + "% " + s.interval_type + " interval")
@@ -187,8 +182,9 @@ def plot_simulated_interventions(df_sol_per_sample, title, s):
 
         label = " ".join(s.variable_of_interest.split("_"))
         ax[k].set_ylabel(label)
-        title = "Intervention on " + " ".join(var.split("_"))
+        title = " ".join(var.split("_")) #"Intervention on " + " ".join(var.split("_"))
         ax[k].set_title(title)
+        #ax[k].set_ylim([min_value, max_value])
 
         if k >= num_plots - 3:  # Last row of plots
             ax[k].set_xlabel(s.time_unit)
@@ -203,50 +199,105 @@ def plot_simulated_interventions(df_sol_per_sample, title, s):
     plt.tight_layout()
     plt.show()
 
-def plot_simulated_intervention_ranking(intervention_effects, s):
+def plot_simulated_intervention_ranking(intervention_effects, s, top_plot=None):
    """ Plot simulated intervention effects in a horizontal boxplot, ranked by median.
    """
-   fig = plt.figure(figsize=(5, 8))  # 7,15
-   ax = fig.add_subplot(111)
    df_SA = pd.DataFrame(intervention_effects)
-
+   
    # Order by median
    df_SA = df_SA.reindex(columns=list(
-                        df_SA.median().sort_values(ascending=False).index))
+                        df_SA.abs().median().sort_values(ascending=False).index))
    df_SA = df_SA.rename(mapper=dict(
-                        zip(s.intervention_variables,
-                           [" ".join(var.split("_")) for var in s.intervention_variables ])), axis=1)
+                        zip(df_SA.columns,
+                           [" ".join(var.split("_")) for var in df_SA.columns])), axis=1)
 
-   sns.boxplot(data=df_SA, showfliers=False, whis=True, orient='h')
-   plt.vlines(x=0, ymin=-0.5, ymax=len(s.intervention_variables) -
+   palette_dict = {var : "#4682B4" for var in df_SA.columns}  # Blue for positive effects
+
+   medians = df_SA.median()
+   lower_than_zero_vars = medians.loc[medians < 0].index
+   for var in lower_than_zero_vars:
+      palette_dict[var] = "#FF6347"  # Red for negative effects
+   palette = list(palette_dict.values())  # Convert to list
+
+   df_SA = df_SA.abs()
+   if top_plot != None:
+       df_SA = df_SA[list(df_SA.columns)[:top_plot]]  #  Take only the top X interventions to plot
+
+   fig = plt.figure(figsize=(5, 8))
+   ax = fig.add_subplot(111)
+   sns.boxplot(data=df_SA, showfliers=False, whis=True, orient='h', palette=palette)
+   plt.vlines(x=0, ymin=-0.5, ymax=len(df_SA.columns) -
                0.6, colors='black', linestyles='dashed')
    plt.title("Effect on " + " ".join(s.variable_of_interest.split("_")))
    plt.xlabel("Standardized effect after " + str(s.t_end) + " " + s.time_unit)
    plt.ylabel("")
    # ax.invert_xaxis()
 
+def plot_feedback_loops_ranking(df_loops, int_var, combine_loop_type, palette_dict):
+    """ Create a ranked box plot of average feedback loop scores.
+    """
+    fig = plt.figure(figsize=(5, 8))
+    ax = fig.add_subplot(111)
 
-# plt.figure()
-# confidence_bounds = .95
-# compare_int_vars = ["Sleep_problems", "Body_fat"]
+    palette = list(palette_dict.values())  # Convert to list
 
-# for k, var in enumerate(compare_int_vars):
-#     means_at_time_t = []
-#     lb_confs_at_time_t = []
-#     ub_confs_at_time_t = []
+    sns.boxplot(data=df_loops.abs(), showfliers=False, whis=True, orient='h', palette=palette);
+    plt.vlines(x=0, ymin=-0.5, ymax=len(df_loops.columns) - 0.6, colors='black', linestyles='dashed');
+    plt.xlabel("Contribution to dynamics (" + combine_loop_type + " over time)");
+    plt.title("Top feedback loops for intervention on " + " ".join(int_var.split("_")));
 
-#     for t in t_eval:
-#         samples_at_time_t = [df_sol_per_sample[n][s.intervention_variables.index(var)].loc[t, s.variable_of_interest] for n in range(s.N)]
-#         mean = np.mean(samples_at_time_t)
-#         standard_error = scipy.stats.sem(samples_at_time_t)
-#         h = standard_error * scipy.stats.t.ppf((1 + confidence_bounds) / 2., s.N-1)
-#         means_at_time_t.append(mean)
-#         lb_confs_at_time_t.append(mean-h)
-#         ub_confs_at_time_t.append(mean+h)
+def plot_feedback_loops_over_time(s, df_loops, loopscores_per_sample, int_var, palette_dict):
+    """ Create plots of feedback loop contributions over time.
+    """
+    num_loops = len(df_loops.columns)
+    num_rows = int(np.ceil(num_loops/2))
+    fig, axs = plt.subplots(num_rows, 2, figsize=(12, 4 * num_rows))
+    fig.suptitle("Top contributing feedback loops for intervention on " + " ".join(int_var.split("_")))
 
-#     plt.plot(t_eval, means_at_time_t, label=" ".join(var.split("_")))
-#     plt.fill_between(t_eval, lb_confs_at_time_t, ub_confs_at_time_t,
-#                         alpha=.3) #, label=str(int(confidence_bounds*100)) + "% CI") #Confidence interval")
-#     plt.xlabel(s.time_unit)
-#     plt.ylabel(" ".join(s.variable_of_interest.split("_")))
-#     plt.legend()
+    palette_dict = {var : "#4682B4" for var in df_loops.columns}  # Blue for positive effects
+
+    ax = axs.flatten()
+    for i, loop in enumerate(df_loops.columns):
+        for k in range(len(df_loops)):
+            df_loops_t = pd.DataFrame(loopscores_per_sample[k])[df_loops.columns].abs()
+            ax[i].plot(df_loops_t[loop], alpha=.3, color=palette_dict[loop])  
+        ax[i].set_ylabel("Contribution to dynamics")
+        ax[i].set_title(loop)
+
+        if i > num_loops - 3:
+            ax[i].set_xlabel(s.time_unit)
+
+    if num_rows * 2 != num_loops:
+        ax[-1].set_visible(False)
+
+
+def plot_feedback_loops_over_time_bounds(s, df_loops, loopscores_per_sample, int_var, palette_dict):
+    """ Create plots of feedback loop contributions over time with confidence bounds
+    """
+    confidence_bounds = .50
+    num_loops = len(df_loops.columns)
+    num_rows = int(np.ceil(num_loops/2))
+    fig, axs = plt.subplots(num_rows, 2, figsize=(12, 4 * num_rows))
+    ax = axs.flatten()
+    fig.suptitle("Top contributing feedback loops for intervention on " + " ".join(int_var.split("_")))
+
+    for j, loop in enumerate(df_loops.columns):
+        avg_at_time_t = []
+        lb_confs_at_time_t = []
+        ub_confs_at_time_t = []
+
+        for i, t in enumerate(s.t_eval[1:]):
+            samples_at_time_t = [loopscores_per_sample[n][loop][i] for n in range(s.N)]
+
+            avg_at_time_t.append(np.median(samples_at_time_t))
+            lower_percentile = (1 - confidence_bounds) / 2 * 100
+            upper_percentile = (1 + confidence_bounds) / 2 * 100
+            lb_confs_at_time_t.append(np.percentile(samples_at_time_t, lower_percentile))
+            ub_confs_at_time_t.append(np.percentile(samples_at_time_t, upper_percentile))
+                
+        ax[j].plot(s.t_eval[1:], avg_at_time_t, color=palette_dict[loop]) 
+        ax[j].fill_between(s.t_eval[1:], lb_confs_at_time_t, ub_confs_at_time_t, alpha=.3, color=palette_dict[loop])   
+        ax[j].set_ylabel("Contribution to dynamics")
+        ax[j].set_title(loop)
+        if j > num_loops - 3: 
+            ax[j].set_xlabel(s.time_unit)

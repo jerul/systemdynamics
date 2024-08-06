@@ -12,7 +12,8 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from systemdynamics.cld import Extract
 from systemdynamics.sdm import SDM
-from systemdynamics.plots import plot_simulated_interventions, plot_simulated_intervention_ranking, plot_simulated_data, plot_simulated_interventions_compare
+from systemdynamics.plots import plot_simulated_interventions, plot_simulated_intervention_ranking, plot_simulated_data
+from systemdynamics.plots import plot_simulated_interventions_compare, plot_feedback_loops_ranking, plot_feedback_loops_over_time, plot_feedback_loops_over_time_bounds
 sns.set_theme()
 
 if __name__ == "__main__":
@@ -56,7 +57,6 @@ if __name__ == "__main__":
             #          '.json', 'w+') as f:
             #    json.dump(settings, f, indent=2)  # Store current settings
 
-
             with open(os.path.join(folder_path, f"used_settings_{setting_name}.json"), 'w+') as f:
                 json.dump(settings, f, indent=2)  # Store current settings
 
@@ -75,7 +75,6 @@ if __name__ == "__main__":
             print("Solving an SDM with interaction terms.")
             if s.solve_analytically and s.interaction_terms:
                 print("Cannot solve analytically with interaction terms so will proceed with numerical solution.")
-
         else:
             print("No interaction terms specified so will solve linear SDM.")
             s.interaction_terms = False
@@ -97,6 +96,16 @@ if __name__ == "__main__":
 
     np.random.seed(s.seed)  # Set seed for reproducibility
 
+    ### Check if any constants have incoming links
+    for const in s.constants:
+        num_links = np.sum(np.abs(df_adj.loc[const, :]))
+        if num_links != 0:
+            #if s.remove_incoming_links_constants:
+            print(f'Removed {num_links} incoming links for constant {const}')
+            df_adj.loc[const, :] = 0
+            #else:
+            #    raise(Exception(f'Number of incoming links for constant {const} is {num_links}, should be zero.'))
+
     # Set the SDM simulation timesteps to store 
     s.t_eval = np.array(np.array([0.0] + list(np.linspace(0, s.t_end,
                                                         int(s.t_end/s.dt) + 1)[1:])))
@@ -107,8 +116,20 @@ if __name__ == "__main__":
     # Select variables to simulated interventions for; all variables except the var of interest by default
     s.intervention_variables = [var for var in s.variables if var != s.variable_of_interest]  
 
-    sdm = SDM(df_adj, interactions_matrix, s)  # Load the module for formulating and simulating the SDM
+    # If double factor interventions selected, add double factor interventions 
+    if s.double_factor_interventions and s.interaction_terms == False:
+        print("Without interaction terms, double factor interventions are not meaningful. Setting double_factor_interventions to False.")
+        s.double_factor_interventions = 0
 
-    if s.simulate_interventions == False:
-        # Set all initial conditions to a small value to get dynamics from the initial conditions
-        x0 = np.ones(len(s.stocks_and_constants), order='F') * 0.01  
+    if s.double_factor_interventions:
+        double_intervention_variables = []
+        for i, var in enumerate(s.intervention_variables):
+            for j in range(i + 1, len(s.intervention_variables)):
+                var_2 = s.intervention_variables[j]
+                double_intervention_variables += [var + '+' + var_2]
+        
+        s.intervention_variables += double_intervention_variables
+
+    # Load the module for formulating and simulating the SDM
+    sdm = SDM(df_adj, interactions_matrix, s)  
+

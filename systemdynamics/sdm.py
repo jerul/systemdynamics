@@ -26,7 +26,7 @@ class SDM:
         self.variables = s.variables
         self.stocks = s.stocks
         self.max_parameter_value = s.max_parameter_value
-        self.max_parameter_value_int = s.max_parameter_value_int
+        # self.max_parameter_value_int = s.max_parameter_value_int
         self.variable_of_interest = s.variable_of_interest
         self.intervention_variables = s.intervention_variables
 
@@ -40,8 +40,7 @@ class SDM:
         if s.setting_name == "Sleep" and s.variable_of_interest == "Depressive_symptoms":
             self.test_with_sleep_depression_model() # Call the test_with_sleep_depression_model function when the class is loaded
 
-
-    def get_intervention_effects(self, df_sol_per_sample, print_effects=True):
+    def get_intervention_effects(self, df_sol_per_sample): #, print_effects=True, top_print=None):
         """ Obtain intervention effects from a dataframe with model simulation results.
         """
         # Create a dictionary with intervention effects on the variable of interest
@@ -53,15 +52,20 @@ class SDM:
         intervention_effects = dict(sorted(intervention_effects.items(),
                                         key=lambda item: np.median(item[1]), reverse=True))
 
-        if print_effects:
-            print("Intervention effect on var of interest", self.variable_of_interest, "by:")
-            for i, i_v in enumerate(intervention_effects.keys()):
-                print("-", i_v, ":", round(np.mean(intervention_effects[i_v]), 2),
-                      "+- SD:", np.round(np.std(intervention_effects[i_v]), 2))
-    
+        # if print_effects:
+        #     print("Intervention effect on var of interest", self.variable_of_interest, "by:")
+        #     if top_print == None:
+        #         print_int_eff = intervention_effects
+        #     else:
+        #         print_int_eff = {int : intervention_effects[int] for int in list(intervention_effects.keys())[:top]}
+            
+        #     for i, i_v in enumerate(print_int_eff.keys()):
+        #         print("-", i_v, ":", round(np.mean(print_int_eff[i_v]), 2),
+        #             "+- SD:", np.round(np.std(print_int_eff[i_v]), 2))
+
         return intervention_effects
 
-    def sample_model_parameters(self, intervention_auxiliaries=None):
+    def sample_model_parameters(self): #, intervention_auxiliaries=None):
         """ Sample from the model parameters using a bounded uniform distribution. 
             The possible parameters are given by the adjacency and interactions matrices.
         """
@@ -69,7 +73,8 @@ class SDM:
         num_pars = int(self.df_adj.abs().sum().sum())
         num_pars_int = int(np.abs(self.interactions_matrix).sum().sum())
         sample_pars = np.random.uniform(0, self.max_parameter_value, size=(num_pars))
-        sample_pars_int = np.random.uniform(0, self.max_parameter_value_int, size=(num_pars_int))
+        sample_pars_int = np.random.uniform(#-self.max_parameter_value/2,
+                                           0, self.max_parameter_value/2, size=(num_pars_int))
 
         par_int_count = 0
         par_count = 0
@@ -78,34 +83,39 @@ class SDM:
             # Intercept
             if var in self.stocks_and_auxiliaries:
                 params[var]["Intercept"] = 0
-            if self.simulate_interventions:
-                if var in intervention_auxiliaries:
-                    if var in self.auxiliaries:
-                        params[var]["Intercept"] = 1
-                    else:
-                        raise Exception("Intervention auxiliary is not an auxiliary variable.")
+            # if self.simulate_interventions:
+            #     if var in intervention_auxiliaries:
+            #         if var in self.auxiliaries:
+            #             params[var]["Intercept"] = intervention_auxiliaries[var]
+            #         else:
+            #             raise Exception("Intervention auxiliary is not an auxiliary variable.")
 
             # Pairwise interactions
             for j, var_2 in enumerate(self.variables):
-                if self.df_adj.loc[var_2, var] != 0:
-                    params[var_2][var] = self.df_adj.loc[var_2, var] * sample_pars[par_count]
+                #if self.df_adj.loc[var_2, var] != 0:
+                if self.df_adj.loc[var, var_2] != 0:
+                    #params[var_2][var] = self.df_adj.loc[var_2, var] * sample_pars[par_count]
+                    params[var][var_2] = self.df_adj.loc[var, var_2] * sample_pars[par_count]
                     par_count += 1
 
                 # 2nd-order interaction terms
                 if self.interaction_terms:
                     for k, var_3 in enumerate(self.variables):
-                        if self.interactions_matrix[k, j, i] != 0:
-                            params[var_3] = {}
-                            params[var_3][var_2 + " * " + var] = self.interactions_matrix[k, j, i] * sample_pars_int[par_int_count]
+                        #if self.interactions_matrix[k, j, i] != 0:
+                        if self.interactions_matrix[i, j, k] != 0:
+                            #params[var_3] = {}
+                            #params[var_3][var_2 + " * " + var] = self.interactions_matrix[k, j, i] * sample_pars_int[par_int_count]
+                            params[var][var_2 + " * " + var_3] = self.interactions_matrix[i, j, k] * sample_pars_int[par_int_count]
                             par_int_count += 1
         self.params = params
         return params
 
-    def make_equations_auxiliary_independent(self): #, params):
+    def make_equations_auxiliary_independent(self, params):
         """" Create independent equations without auxiliaries.
         Input: parameter dictionary with auxiliary terms
         Output: parameter dictionary without auxiliary terms (i.e., only in terms of stocks and constants)
         """
+        self.params = params
         new_params = deepcopy(self.params)
 
         original_equations = {var : " + ".join([pred + " * " + str(new_params[var][pred]) if
@@ -177,7 +187,7 @@ class SDM:
         if self.interaction_terms:
             solution = solve_ivp(self.solve_sdm, self.t_span, x0, args=(A, K, b),
                                 t_eval=self.t_eval, jac=self.jac,
-                                method=self.solver, rtol=1e-6, atol=1e-6)
+                                method=self.solver, rtol=1e-6, atol=1e-6).y
         else:  # Linear system
             if self.solve_analytically: 
                 solution = self.analytical_solution(self.t_eval[:, None], x0, A, b).T
@@ -185,6 +195,9 @@ class SDM:
                 solution = solve_ivp(self.solve_sdm_linear, self.t_span, x0, args=(A, b),
                                    t_eval=self.t_eval, jac=self.jac_linear,
                                    method=self.solver, rtol=1e-6, atol=1e-6).y
+
+        if np.sum(solution > 100):
+            print("Warning: Solution has values larger than 100. The maximum parameter value (max_parameter_value) may be too large.")
 
         df_sol = pd.DataFrame(solution.T, columns=self.stocks_and_constants, index=self.t_eval)
         df_sol["Time"] = df_sol.index
@@ -263,7 +276,6 @@ class SDM:
         """
         return A
 
-
     def get_link_scores(self, df_i, params):
         """ Get the link scores for the Loops That Matter method.
         """
@@ -278,23 +290,50 @@ class SDM:
             for target in self.stocks_and_auxiliaries:  # For all stocks and auxiliaries
                 target_value = df_i.loc[current_t, target]
                 target_previous_value = df_i.loc[previous_t, target]
+                delta_target = target_value - target_previous_value 
+
                 if target in self.stocks:
                     sum_of_flows = 0
-                    for source in linkscores[t][target]:
-                        source_previous_value = df_i.loc[previous_t, source]
-                        if params[target][source] > 0:  # Inflow [TODO: Ensure that also variables that only an interaction term are included here]
-                            sum_of_flows += source_previous_value
-                        else:  # Outflow
-                            sum_of_flows -= source_previous_value
+                    sum_of_delta_flows = 0
+                    sum_of_previous_flows = 0
 
-                    for source in linkscores[t][target]:
-                        source_previous_value = df_i.loc[previous_t, source]
-                        if sum_of_flows == 0:
-                            linkscores[t][target][source] = 0
-                        elif params[target][source] > 0:  # Inflow
-                            linkscores[t][target][source] = -np.abs(source_previous_value/sum_of_flows)
-                        else:  # Outflow
-                            linkscores[t][target][source] = np.abs(source_previous_value/sum_of_flows)
+                    for run in range(2):
+                        for source in linkscores[t][target]:
+                            if "*" in source:  # Interaction term
+                                source_1_previous_value = df_i.loc[previous_t, source.split(" * ")[0]]
+                                source_2_previous_value = df_i.loc[previous_t, source.split(" * ")[1]]
+                                source_1_current_value = df_i.loc[current_t, source.split(" * ")[0]]
+                                source_2_current_value = df_i.loc[current_t, source.split(" * ")[1]]
+                                flow_previous_value = source_1_previous_value * source_2_previous_value * params[target][source]
+                                flow_current_value = source_1_current_value * source_2_current_value * source_current_value * params[target][source]
+                            else:  # Regular term
+                                source_previous_value = df_i.loc[previous_t, source]
+                                source_current_value = df_i.loc[current_t, source]
+                                flow_previous_value = source_previous_value * params[target][source]
+                                flow_current_value = source_current_value * params[target][source]
+
+                            delta_source = source_current_value - source_previous_value
+                            delta_flow = flow_current_value - flow_previous_value
+
+                            if run == 0:
+                                sum_of_delta_flows += delta_flow
+                                sum_of_flows += flow_current_value
+                                sum_of_previous_flows += flow_previous_value
+
+                        # for source in linkscores[t][target]:
+                        #     source_previous_value = df_i.loc[previous_t, source]
+                        #     source_current_value = df_i.loc[current_t, source]
+                        #     delta_target = target_value-target_previous_value 
+                        #     delta_source = source_current_value - source_previous_value
+                        #     flow_previous_value = source_previous_value * params[target][source]
+                        #     flow_current_value = source_current_value * params[target][source]
+                        #     delta_flow = flow_current_value - flow_previous_value
+                            else:  # Second run
+                                if sum_of_flows == 0 or sum_of_delta_flows == 0:
+                                    linkscores[t][target][source] = 0
+                                else:
+                                    sign = np.sign(params[target][source])  # Determine whether inflow or outflow
+                                    linkscores[t][target][source] = np.abs(delta_flow / sum_of_delta_flows) * sign
                 
                 elif target_value == target_previous_value:  # No change, thus remains constant
                     for source in linkscores[t][target]:
@@ -302,20 +341,27 @@ class SDM:
                 
                 else:  # Auxiliary
                     for source in linkscores[t][target]:
-                        source_value = df_i.loc[current_t, source]
-                        source_previous_value = df_i.loc[previous_t, source]
-                
-                        # Determine what the value for target would have been this if only the source changed
-                        ## Previous value + (source value - previous source value) * parameter
-                        t_respect_source = target_previous_value + (source_value - source_previous_value) * params[target][source]
-                        delta_t_respect_to_s = t_respect_source - target_previous_value
-                        delta_source = source_value - source_previous_value
-                        sign = 1
-                        if delta_source != 0 and delta_t_respect_to_s != 0:
-                            sign = np.sign(delta_t_respect_to_s / delta_source)
-
-                        linkscores[t][target][source] = np.abs(delta_t_respect_to_s / (target_value - target_previous_value)) * sign
-
+                        if "*" in source:  # Interaction term
+                            source_1_previous_value = df_i.loc[previous_t, source.split(" * ")[0]]
+                            source_2_previous_value = df_i.loc[previous_t, source.split(" * ")[1]]
+                            source_1_current_value = df_i.loc[current_t, source.split(" * ")[0]]
+                            source_2_current_value = df_i.loc[current_t, source.split(" * ")[1]]
+                            delta_source_1 = source_1_current_value - source_1_previous_value
+                            delta_source_2 = source_2_current_value - source_2_previous_value
+                            delta_target_respect_to_source = delta_source_1 * delta_source_2 * params[target][source]
+                            sign = np.sign(delta_target_respect_to_source/(delta_source_1 * delta_source_2))
+                        else:
+                            source_value = df_i.loc[current_t, source]
+                            source_previous_value = df_i.loc[previous_t, source]
+                            delta_source = source_value - source_previous_value
+                            delta_target_respect_to_source = delta_source * params[target][source]
+                            sign = np.sign(delta_target_respect_to_source/delta_source)  # np.sign(params[target][source])
+                        #if delta_source != 0 and delta_t_respect_to_s != 0:
+                        #    sign = np.sign(delta_t_respect_to_s / delta_source)
+                        if delta_target == 0 or delta_source == 0:
+                            linkscores[t][target][source] = 0
+                        else:
+                            linkscores[t][target][source] = np.abs(delta_target_respect_to_source / delta_target) * sign
         return linkscores
 
     def get_loop_scores(self, linkscores):
@@ -324,45 +370,30 @@ class SDM:
         # Create a DiGraph from the adjacency matrix
         G = nx.DiGraph(self.df_adj)
         feedback_loops = list(nx.simple_cycles(G))
-        # feedback_loops = [loop for loop in feedback_loops if len(loop) > 1]  # Optional: Omit self-cycles
-
         t_eval_loops = self.t_eval[1:]
 
-        while True:
-            try:                
-                loopscores = {}
-                for loop in feedback_loops:
-                    loop_name = ", ".join(loop)
-                    loopscores[loop_name] = []
-                    #print(loop)
-                    close_loop = loop + [loop[0]]  # Add first element at the end again to close the loop
-                    link_scores_per_loop = []
+        loopscores = {}
+        for loop in feedback_loops:
+            loop_name = ", ".join(loop)
+            loopscores[loop_name] = []
+            close_loop = loop + [loop[0]]  # Add first element at the end again to close the loop
 
-                    for t in t_eval_loops:
-                        for i in range(len(close_loop)-1):
-                            assert self.df_adj.loc[close_loop[i], close_loop[i+1]] != 0  # There must be a link between the two nodes
-                            link_scores_per_loop += [linkscores[t][close_loop[i]][close_loop[i+1]]]
-                        
-                        loop_score = np.prod(link_scores_per_loop)
-                        loopscores[loop_name] += [loop_score]  # Loop score per time
+            for t in t_eval_loops:
+                link_scores_per_loop = []
+                for i in range(len(close_loop)-1):
+                    assert self.df_adj.loc[close_loop[i], close_loop[i+1]] != 0  # There must be a link between the two nodes
+                    link_scores_per_loop += [linkscores[t][close_loop[i]][close_loop[i+1]]]
+                
+                loop_score = np.prod(link_scores_per_loop)
+                loopscores[loop_name] += [loop_score]  # Loop score per time
 
-                    #print("Link scores:", link_scores_per_loop, "Loop score:", loop_score,"\n")
+            #print("Link scores:", link_scores_per_loop, "Loop score:", loop_score,"\n")
 
-                ### Finally, normalize the loop scores by taking the loop score divided by the sum of all loop scores
-                normalizing_constants = [np.sum([loopscores[ls][i] for ls in loopscores]) for i in range(len(t_eval_loops))]
-
-                for i in range(len(t_eval_loops)):
-                    for ls in loopscores:
-                        loopscores[ls][i] = loopscores[ls][i] / normalizing_constants[i]
-
-                assert abs(np.mean([sum([loopscores[ls][i] for ls in loopscores]) for i in range(len(t_eval_loops))])-1) < 1e-10
-
-            except:
-                t_eval_loops = self.t_eval[2:]  # This is needed for interventions on constants or stocks that are only in a balancing loop
-                # print("Except was used for loop score calculation. Now running from timestep 2 instead of 1.")
-                continue
-            break  # Break the loop if no except occurs
-
+        ### Finally, normalize the loop scores by taking the loop score divided by the sum of all loop scores
+        normalizing_constants = [np.sum([np.abs(loopscores[ls][i]) for ls in loopscores]) for i in range(len(t_eval_loops))]
+        for i in range(len(t_eval_loops)):
+            for ls in loopscores:
+                loopscores[ls][i] = loopscores[ls][i] / normalizing_constants[i]
         return loopscores, feedback_loops
 
 
@@ -394,8 +425,8 @@ class SDM:
     def test_vectorized_eqs(self):
         """ Test whether the vectorized equations are the same as the non-vectorized equations.
         """
-        self.params = self.sample_model_parameters([])  # Sample model parameters
-        self.new_params = self.make_equations_auxiliary_independent()  # Remove auxiliaries from the equations
+        self.params = self.sample_model_parameters()  #([])  # Sample model parameters
+        self.new_params = self.make_equations_auxiliary_independent(self.params)  # Remove auxiliaries from the equations
         x0 = np.ones(len(self.stocks_and_constants), order='F') * 0.01  
         A, K, b = self.get_A_and_K_matrices()  # Get A and K matrices and intercept vector from the parameter dictionary without auxiliaries
 
@@ -427,35 +458,38 @@ class SDM:
         s_p = (x[self.stocks_and_constants.index("Body_fat")] * params["Sleep_problems"]["Body_fat"] + 
                 x[self.stocks_and_constants.index("Perceived_stress")] * params["Sleep_problems"]["Perceived_stress"] +
                 p_p * params["Sleep_problems"]["Proinflammatory_processes"] + params["Sleep_problems"]["Intercept"]) # Sleep problems
-        
-        # print("Auxiliaries: ", p_a, p_p, s_p)
+        t_m = (x[self.stocks_and_constants.index("Depressive_symptoms")] * params["Treatment"]["Depressive_symptoms"] + 
+                params["Treatment"]["Intercept"])
+        # print("Auxiliaries: ", p_a, p_p, s_p, t_m)
 
         # Stocks, order: Depressive_symptoms, Childhood_adversity, Body_fat, Perceived_stress, Treatment
         d_s = (s_p * params["Depressive_symptoms"]["Sleep_problems"] + 
                 x[self.stocks_and_constants.index("Childhood_adversity")] * params["Depressive_symptoms"]["Childhood_adversity"] +
                 x[self.stocks_and_constants.index("Perceived_stress")] * params["Depressive_symptoms"]["Perceived_stress"] +
-                x[self.stocks_and_constants.index("Treatment")] * params["Depressive_symptoms"]["Treatment"] + 
-        p_p * params["Depressive_symptoms"]["Proinflammatory_processes"] + params["Depressive_symptoms"]["Intercept"])  # Depressive symptoms
+                #x[self.stocks_and_constants.index("Treatment")] * params["Depressive_symptoms"]["Treatment"] + 
+                t_m * params["Depressive_symptoms"]["Treatment"] + 
+               p_p * params["Depressive_symptoms"]["Proinflammatory_processes"] + params["Depressive_symptoms"]["Intercept"])  # Depressive symptoms
+        if self.interaction_terms:
+            d_s += s_p * x[self.stocks_and_constants.index("Perceived_stress")] * params["Depressive_symptoms"]["Perceived_stress * Sleep_problems"]
         c_a = 0  # Childhod adversity
         b_f = (s_p * params["Body_fat"]["Sleep_problems"] + 
                 p_a * params["Body_fat"]["Physical_activity"] + params["Body_fat"]["Intercept"])  # Body fat
-        if self.interaction_terms:
-            b_f += s_p * p_a * params["Body_fat"]["Physical_activity * Sleep_problems"]
+        # if self.interaction_terms:
+        #     b_f += s_p * p_a * params["Body_fat"]["Physical_activity * Sleep_problems"]
         p_s = (s_p * params["Perceived_stress"]["Sleep_problems"] +
                 x[self.stocks_and_constants.index("Depressive_symptoms")] * params["Perceived_stress"]["Depressive_symptoms"] +
                 x[self.stocks_and_constants.index("Childhood_adversity")] * params["Perceived_stress"]["Childhood_adversity"] + 
                 params["Perceived_stress"]["Intercept"])  # Perceived stress'
-        t_m = (x[self.stocks_and_constants.index("Depressive_symptoms")] * params["Treatment"]["Depressive_symptoms"] + 
-                params["Treatment"]["Intercept"]) # Treatment
-        return np.array([d_s, c_a, b_f, p_s, t_m])
+        #t_m = (x[self.stocks_and_constants.index("Depressive_symptoms")] * params["Treatment"]["Depressive_symptoms"] + 
+        #        params["Treatment"]["Intercept"]) # Treatment
+        return np.array([d_s, c_a, b_f, p_s])#, t_m])
 
     def test_with_sleep_depression_model(self):
         """ Test whether the vectorized equations are the same as the manually implemented equations.
         """
-        self.params = self.sample_model_parameters([])  # Sample model parameters
-        self.new_params = self.make_equations_auxiliary_independent()  # Remove auxiliaries from the equations
+        self.params = self.sample_model_parameters()  #([])  # Sample model parameters
+        self.new_params = self.make_equations_auxiliary_independent(self.params)  # Remove auxiliaries from the equations
         A, K, b = self.get_A_and_K_matrices()  # Get A and K matrices and intercept vector from the parameter dictionary without auxiliaries
-
         x0 = np.ones(len(self.stocks_and_constants), order='F') * 0.01  
         solution = solve_ivp(self.solve_sdm, self.t_span, x0, args=(A, K, b),
                                 t_eval=self.t_eval, method=self.solver, rtol=1e-6, atol=1e-6)
@@ -469,8 +503,8 @@ class SDM:
     def test_with_linear_model(self):
         """ Test whether the algebraic solution is similar to the numerical solution.
         """
-        self.params = self.sample_model_parameters([])  # Sample model parameters
-        self.new_params = self.make_equations_auxiliary_independent()  # Remove auxiliaries from the equations
+        self.params = self.sample_model_parameters()  #([])  # Sample model parameters
+        self.new_params = self.make_equations_auxiliary_independent(self.params)  # Remove auxiliaries from the equations
         A, K, b = self.get_A_and_K_matrices()  # Get A and K matrices and intercept vector from the parameter dictionary without auxiliaries
 
         x0 = np.ones(len(self.stocks_and_constants), order='F') * 0.01  
