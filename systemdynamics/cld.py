@@ -4,14 +4,88 @@ import numpy as np
 from openpyxl import load_workbook
 
 class Extract:
-    def __init__(self, file_path):
+    def __init__(self, s, file_path):
         self.file_path = file_path
         self.variables = []
         self.var_to_type = {}
         self.adjacency_matrix = None
         self.interactions_matrix = None
+        self.s = s
         self.test_extraction()  # Call the test_extraction function when the class is loaded
 
+    def extract_settings(self):
+        """ Extract all settings based on the json and Kumu files
+        """
+        s = self.s
+        # Load the adjacency matrix from the KUmu file
+        variable_names, var_to_type_init, adjacency_matrix, interactions_matrix = self.adjacency_matrix_from_kumu()  
+
+        if s.interaction_terms:
+            if np.abs(interactions_matrix).sum() > 0:
+                #s.interaction_terms = True
+                print("Solving an SDM with interaction terms.")
+                if s.solve_analytically and s.interaction_terms:
+                    print("Cannot solve analytically with interaction terms so will proceed with numerical solution.")
+            else:
+                print("No interaction terms specified so will solve linear SDM.")
+                s.interaction_terms = False
+    
+        # Load variable names and automatically fill any spaces with underscores
+        s.stocks = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var] == 'stock']
+        s.auxiliaries = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var] == 'auxiliary']
+        s.constants = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var] == 'constant']
+        s.variables = [var.replace(" ", "_") for var in variable_names]  # s.auxiliaries + s.stocks + s.constants
+        s.stocks_and_constants = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var] in ['stock', 'constant']]
+        s.stocks_and_auxiliaries = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var] in ['stock', 'auxiliary']]
+        s.var_to_type = {var.replace(" ", "_") : var_to_type_init[var] for var in variable_names}
+        s.variable_of_interest = "_".join(s.variable_of_interest.split(" "))  # Ensure the variable of interest is formulated with underscores
+        s.simulate_interventions = True  # Always simulate interventions
+        
+        # Create dataframe with adjacency matrix
+        df_adj = pd.DataFrame(adjacency_matrix,
+                            columns=s.variables, index=s.variables) 
+
+        np.random.seed(s.seed)  # Set seed for reproducibility
+
+        ### Check if any constants have incoming links
+        for const in s.constants:
+            num_links = np.sum(np.abs(df_adj.loc[const, :]))
+            if num_links != 0:
+                #if s.remove_incoming_links_constants:
+                print(f'Removed {num_links} incoming links for constant {const}')
+                df_adj.loc[const, :] = 0
+                #else:
+                #    raise(Exception(f'Number of incoming links for constant {const} is {num_links}, should be zero.'))
+
+        # Set the SDM simulation timesteps to store 
+        s.t_eval = np.array(np.array([0.0] + list(np.linspace(0, s.t_end,
+                                                            int(s.t_end/s.dt) + 1)[1:])))
+
+        # If solving the system numerically, set the solver
+        s.solver = 'LSODA'  # 'LSODA' automatically switches between stiff and non-stiff methods since stiffness is not always known.
+
+        # Select variables to simulated interventions for; all variables except the var of interest by default
+        s.intervention_variables = [var for var in s.variables if var != s.variable_of_interest]  
+
+        # If double factor interventions selected, add double factor interventions 
+        if s.double_factor_interventions and s.interaction_terms == False:
+            print("Without interaction terms, double factor interventions are not meaningful. Setting double_factor_interventions to False.")
+            s.double_factor_interventions = 0
+
+        if s.double_factor_interventions:
+            double_intervention_variables = []
+            for i, var in enumerate(s.intervention_variables):
+                for j in range(i + 1, len(s.intervention_variables)):
+                    var_2 = s.intervention_variables[j]
+                    double_intervention_variables += [var + '+' + var_2]
+            
+            s.intervention_variables += double_intervention_variables
+
+        s.df_adj = df_adj  # Save the adjacency matrix to the settings
+        s.interactions_matrix = interactions_matrix # Save the interactions matrix to the settings
+        self.s = s  # Save the settings
+
+        return s
 
     def extract_adjacency_matrix(self):
         """Extract the adjacency matrix from an Excel table exported from Kumu (Kumu.io).

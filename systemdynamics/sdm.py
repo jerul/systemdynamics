@@ -6,7 +6,7 @@ from copy import deepcopy
 from sympy.parsing.sympy_parser import parse_expr
 import sympy as sym
 import networkx as nx
-# from types import SimpleNamespace
+from tqdm import tqdm 
 
 class SDM:
     def __init__(self, df_adj, interactions_matrix, s):
@@ -26,7 +26,6 @@ class SDM:
         self.variables = s.variables
         self.stocks = s.stocks
         self.max_parameter_value = s.max_parameter_value
-        # self.max_parameter_value_int = s.max_parameter_value_int
         self.variable_of_interest = s.variable_of_interest
         self.intervention_variables = s.intervention_variables
 
@@ -40,30 +39,149 @@ class SDM:
         if s.setting_name == "Sleep" and s.variable_of_interest == "Depressive_symptoms":
             self.test_with_sleep_depression_model() # Call the test_with_sleep_depression_model function when the class is loaded
 
-    def get_intervention_effects(self, df_sol_per_sample): #, print_effects=True, top_print=None):
+    def flatten(self, xss):
+        return [x for xs in xss for x in xs]
+
+    def run_SA(self, outcome_var=False, input_var=False, int_var=None, cut_off_SA_importance=0.1):
+        """ Run sensitivity analysis for the model parameters, either for a specific intervention (int_var) or over all interventions
+        """  
+        if input_var:
+            if int_var == None:
+                loop_over = [list(self.intervention_effects.keys())[0]]
+            else:
+                loop_over = [int_var]
+        else:
+            loop_over = self.intervention_variables
+
+        param_names = self.flatten([[source+"->"+target for source in self.param_samples[self.intervention_variables[0]][target]]
+                            for target in self.param_samples[self.intervention_variables[0]]])
+        df_SA = pd.DataFrame(columns=param_names+["Effect"])
+
+        for i_v in loop_over:
+            i = self.intervention_variables.index(i_v)
+            for n in range(self.N):
+                params_curr = self.flatten([[self.param_samples[i_v][target][source][n]
+                                        for source in self.param_samples[i_v][target]]
+                                        for target in self.param_samples[i_v]])
+                if outcome_var:  # Specifically on the variable of interest
+                    eff_size = abs(self.df_sol_per_sample[n][i].loc[self.df_sol_per_sample[n][i].Time==self.t_eval[-1], self.variable_of_interest])
+                    new_row = np.array(params_curr + [float(eff_size.iloc[0])])
+                else:  
+                    eff_size = self.df_sol_per_sample[n][i].loc[self.df_sol_per_sample[n][i].Time==self.t_eval[-1], :].abs().mean().mean()
+                    new_row = np.array(params_curr + [float(eff_size)])
+    
+                df_SA_new = pd.DataFrame(new_row, index=param_names + ["Effect"]).T
+                df_SA = pd.concat([df_SA, df_SA_new], ignore_index=True)
+
+        ## Top ranked model parameters across the interventions
+        SA_results = round(df_SA.corr('spearman').abs()['Effect'][[p for p in param_names if "Intercept" not in p]].sort_values(ascending=False), 2)
+
+        print(SA_results.loc[SA_results>cut_off_SA_importance].to_string())  # Print the sensitivity analysis results
+
+        return SA_results, df_SA
+
+    def run_simulations(self):
+        """ Run the simulations for N iterations for all the specified interventions
+        """
+        df_sol_per_sample = []  # List for storing the solution dataframes
+        df_sol_per_sample_no_int = []   # List for storuing the solution dataframes without interventions
+        param_samples = {var : {} for var in self.intervention_variables}  # Dictionary for storing the parameters across samples
+
+        for num in tqdm(range(self.N)):  # Iterate over the number of samples
+            df_sol = []
+
+            params_i = self.sample_model_parameters() #s.intervention_auxiliaries)  # Sample model parameters
+
+            for i, var in enumerate(self.intervention_variables):
+                # Set the initial condition for the stocks to zero
+                x0 = np.zeros(len(self.stocks_and_constants), order='F')  # By default no intervention on a stock or constant (initialized in equilibrium)
+                intervention_auxiliaries = {}  # By default no intervention on an auxiliary
+                params = deepcopy(params_i)  # Copy the parameters to avoid overwriting the original parameters
+
+                if '+' in var:  # Double factor intervention
+                    var_1, var_2 = var.split('+')
+                    if var_1 in self.stocks_and_constants:  # Intervention on a stock or constant (first intervention variable)
+                        x0[self.stocks_and_constants.index(var_1)] += 1/2  # Increase the (baseline) value of the stock/constant by 1/2
+                    else:  # Intervention on an auxiliary
+                        params[var_1]["Intercept"] = 1/2
+                    if var_2 in self.stocks_and_constants:
+                        x0[self.stocks_and_constants.index(var_2)] += 1/2  
+                    else:
+                        params[var_2]["Intercept"] = 1/2
+                else:  # Single factor intervention
+                    if var in self.stocks_and_constants:  # Intervention on a stock or constant (only variable)
+                        x0[self.stocks_and_constants.index(var)] += 1  # Increase the (baseline) value of the stock/constant by 1
+                    else:  # Intervention on an auxiliary (only variable)
+                        params[var]["Intercept"] = 1
+
+                new_params = self.make_equations_auxiliary_independent(params)  # Remove auxiliaries from the equations
+                if np.sum([[1 for par in new_params[st] if par in self.auxiliaries] for st in new_params]) > 0:
+                    raise(Exception('Some parameters are defined for auxiliaries. This means the process of making equations auxiliary independent failed.',
+                                    'Likely because of a feedback loop with only auxiliaries. Please ensure that all feedback loops contain at least one stock.'))
+                A, K, b = self.get_A_and_K_matrices()  # Get A and K matrices and intercept vector from the parameter dictionary without auxiliaries
+                df_sol_per_intervention = self.run_SDM(x0, A, K, b)
+                df_sol += [df_sol_per_intervention]
+
+                # Store the model parameters
+                if num == 0: 
+                    param_samples[var] = {target : {source : [params[target][source]] for source in params[target]} for target in params}
+                else:
+                    for target in params:
+                        for source in params[target]:
+                            param_samples[var][target][source] += [params[target][source]]
+
+            df_sol_per_sample += [df_sol]
+
+        self.df_sol_per_sample = df_sol_per_sample
+        self.param_samples = param_samples
+        return df_sol_per_sample, param_samples
+
+    def get_intervention_effects(self):
         """ Obtain intervention effects from a dataframe with model simulation results.
         """
         # Create a dictionary with intervention effects on the variable of interest
-        intervention_effects = {i_v : [(df_sol_per_sample[n][i].loc[self.t_eval[-1], self.variable_of_interest] -
-                                df_sol_per_sample[n][i].loc[0, self.variable_of_interest]) 
+        intervention_effects = {i_v : [(self.df_sol_per_sample[n][i].loc[self.t_eval[-1], self.variable_of_interest] -
+                                self.df_sol_per_sample[n][i].loc[0, self.variable_of_interest]) 
                                 for n in range(self.N)] for i, i_v in enumerate(self.intervention_variables)}
 
         # Sort the dictionary by the mean intervention effect
         intervention_effects = dict(sorted(intervention_effects.items(),
-                                        key=lambda item: np.median(item[1]), reverse=True))
+                                        key=lambda item: np.median(np.abs(item[1])), reverse=True))
 
-        # if print_effects:
-        #     print("Intervention effect on var of interest", self.variable_of_interest, "by:")
-        #     if top_print == None:
-        #         print_int_eff = intervention_effects
-        #     else:
-        #         print_int_eff = {int : intervention_effects[int] for int in list(intervention_effects.keys())[:top]}
-            
-        #     for i, i_v in enumerate(print_int_eff.keys()):
-        #         print("-", i_v, ":", round(np.mean(print_int_eff[i_v]), 2),
-        #             "+- SD:", np.round(np.std(print_int_eff[i_v]), 2))
-
+        self.intervention_effects = intervention_effects
         return intervention_effects
+
+    def run_loops_that_matter(self, int_var=None): 
+        """ Calculate link and loop scores for all samples using the Loops That Matter method
+        """
+        if int_var == None:
+            int_var = list(self.intervention_effects.keys())[0]  # Select an intervention for which we will assess the feedback loop dominance
+        j = self.intervention_variables.index(int_var)
+
+        ## Get the right loop scores for specific intervention
+        linkscores_per_sample = []
+        loopscores_per_sample = []
+        loopscores_combined_per_sample = []
+        for k in range(self.N):  # Loop over all samples
+            df_i = self.df_sol_per_sample[k][j]
+            params = {target : {source : self.param_samples[int_var][target][source][k]
+                                        for source in self.param_samples[int_var][target]}
+                                        for target in self.param_samples[int_var]}
+            linkscores = self.get_link_scores(df_i, params)
+            loopscores, feedback_loops = self.get_loop_scores(linkscores)
+            linkscores_per_sample += [linkscores]
+            loopscores_per_sample += [loopscores]
+            loopscores_combined_over_time = {loop : np.mean(loopscores[loop]) for loop in loopscores}
+            loopscores_combined_per_sample += [loopscores_combined_over_time]
+
+        loopscores_combined_per_sample = {loop : [loopscores_combined_per_sample[k][loop] for k in range(self.N)] for loop in loopscores_combined_per_sample[0]}
+
+        df_loops = pd.DataFrame(loopscores_combined_per_sample)
+        df_loops = df_loops.reindex(columns=list(
+                            df_loops.abs().median().sort_values(ascending=False).index))
+        self.df_loops = df_loops
+        self.loopscores_per_sample = loopscores_per_sample
+        return df_loops, loopscores_per_sample
 
     def sample_model_parameters(self): #, intervention_auxiliaries=None):
         """ Sample from the model parameters using a bounded uniform distribution. 
@@ -83,28 +201,18 @@ class SDM:
             # Intercept
             if var in self.stocks_and_auxiliaries:
                 params[var]["Intercept"] = 0
-            # if self.simulate_interventions:
-            #     if var in intervention_auxiliaries:
-            #         if var in self.auxiliaries:
-            #             params[var]["Intercept"] = intervention_auxiliaries[var]
-            #         else:
-            #             raise Exception("Intervention auxiliary is not an auxiliary variable.")
 
             # Pairwise interactions
             for j, var_2 in enumerate(self.variables):
                 #if self.df_adj.loc[var_2, var] != 0:
                 if self.df_adj.loc[var, var_2] != 0:
-                    #params[var_2][var] = self.df_adj.loc[var_2, var] * sample_pars[par_count]
                     params[var][var_2] = self.df_adj.loc[var, var_2] * sample_pars[par_count]
                     par_count += 1
 
                 # 2nd-order interaction terms
                 if self.interaction_terms:
                     for k, var_3 in enumerate(self.variables):
-                        #if self.interactions_matrix[k, j, i] != 0:
                         if self.interactions_matrix[i, j, k] != 0:
-                            #params[var_3] = {}
-                            #params[var_3][var_2 + " * " + var] = self.interactions_matrix[k, j, i] * sample_pars_int[par_int_count]
                             params[var][var_2 + " * " + var_3] = self.interactions_matrix[i, j, k] * sample_pars_int[par_int_count]
                             par_int_count += 1
         self.params = params
@@ -145,7 +253,7 @@ class SDM:
         self.new_params = new_params
         return new_params
 
-    def get_A_and_K_matrices(self): #, new_params):
+    def get_A_and_K_matrices(self):
         """ Create matrices A and K from the parameter dictionary without auxiliary terms.
             Also returns the intercept terms as a vector.
         """
@@ -219,8 +327,6 @@ class SDM:
             exp_At = scipy.linalg.expm(A * t)
             sol[i, :] = np.matmul((exp_At - I), A_inv_b) + np.matmul(exp_At, x0)
         return sol
-        #exp_At = scipy.linalg.expm(A * t)
-        #return np.matmul((exp_At - I), np.matmul(A_inv, b)) + np.matmul(exp_At, x0)
     
     def solve_sdm(self, t, x, A, K, b):
         """ Solve the system of differential equations representing the SDM.
@@ -319,15 +425,6 @@ class SDM:
                                 sum_of_delta_flows += delta_flow
                                 sum_of_flows += flow_current_value
                                 sum_of_previous_flows += flow_previous_value
-
-                        # for source in linkscores[t][target]:
-                        #     source_previous_value = df_i.loc[previous_t, source]
-                        #     source_current_value = df_i.loc[current_t, source]
-                        #     delta_target = target_value-target_previous_value 
-                        #     delta_source = source_current_value - source_previous_value
-                        #     flow_previous_value = source_previous_value * params[target][source]
-                        #     flow_current_value = source_current_value * params[target][source]
-                        #     delta_flow = flow_current_value - flow_previous_value
                             else:  # Second run
                                 if sum_of_flows == 0 or sum_of_delta_flows == 0:
                                     linkscores[t][target][source] = 0
@@ -355,12 +452,10 @@ class SDM:
                             source_previous_value = df_i.loc[previous_t, source]
                             delta_source = source_value - source_previous_value
                             delta_target_respect_to_source = delta_source * params[target][source]
-                            sign = np.sign(delta_target_respect_to_source/delta_source)  # np.sign(params[target][source])
-                        #if delta_source != 0 and delta_t_respect_to_s != 0:
-                        #    sign = np.sign(delta_t_respect_to_s / delta_source)
                         if delta_target == 0 or delta_source == 0:
                             linkscores[t][target][source] = 0
                         else:
+                            sign = np.sign(delta_target_respect_to_source/delta_source)
                             linkscores[t][target][source] = np.abs(delta_target_respect_to_source / delta_target) * sign
         return linkscores
 
@@ -387,9 +482,7 @@ class SDM:
                 loop_score = np.prod(link_scores_per_loop)
                 loopscores[loop_name] += [loop_score]  # Loop score per time
 
-            #print("Link scores:", link_scores_per_loop, "Loop score:", loop_score,"\n")
-
-        ### Finally, normalize the loop scores by taking the loop score divided by the sum of all loop scores
+        ### Normalize the loop scores by taking the loop score divided by the sum of all loop scores
         normalizing_constants = [np.sum([np.abs(loopscores[ls][i]) for ls in loopscores]) for i in range(len(t_eval_loops))]
         for i in range(len(t_eval_loops)):
             for ls in loopscores:
