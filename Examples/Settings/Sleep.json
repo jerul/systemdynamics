@@ -7,6 +7,6 @@
         "max_parameter_value" : 0.2,
         "solve_analytically" : 1,
         "interaction_terms" : 0,
-        "double_factor_interventions" : 0,
+        "double_factor_interventions" : 1,
         "save_results" : 0
 }

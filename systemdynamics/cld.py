@@ -83,6 +83,26 @@ class Extract:
 
         s.df_adj = df_adj  # Save the adjacency matrix to the settings
         s.interactions_matrix = interactions_matrix # Save the interactions matrix to the settings
+
+        # Add the interactions to the adjacency matrix for the identification of feedback loops with interaction terms
+        # s.df_adj_incl_interactions = s.df_adj + pd.DataFrame(s.interactions_matrix.sum(axis=0),
+        #                                                      index=s.variables, columns=s.variables)
+        # s.df_adj_incl_interactions += pd.DataFrame(s.interactions_matrix.sum(axis=1),
+        #                                            index=s.variables, columns=s.variables)
+        # s.df_adj_incl_interactions[s.df_adj_incl_interactions > 1] = 1
+        # s.df_adj_incl_interactions[s.df_adj_incl_interactions < -1] = -1
+
+        s.df_adj_incl_interactions = s.df_adj.copy()
+        to_list, from1_list, from2_list = np.nonzero(s.interactions_matrix)
+        for i in range(int(np.abs(s.interactions_matrix).sum())):
+            to, from1, from2 = to_list[i], from1_list[i], from2_list[i]
+            value = s.interactions_matrix[to, from1, from2]
+            # Ensure that the interaction is nonzero in the adjacency matrix
+            s.df_adj_incl_interactions.loc[s.df_adj_incl_interactions.index[to],
+                                           s.df_adj_incl_interactions.columns[from1]] = value
+            s.df_adj_incl_interactions.loc[s.df_adj_incl_interactions.index[to],
+                                           s.df_adj_incl_interactions.columns[from2]] = value
+            
         self.s = s  # Save the settings
 
         return s

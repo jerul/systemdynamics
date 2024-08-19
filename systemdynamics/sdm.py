@@ -11,6 +11,7 @@ from tqdm import tqdm
 class SDM:
     def __init__(self, df_adj, interactions_matrix, s):
         self.df_adj = df_adj
+        self.df_adj_incl_interactions = s.df_adj_incl_interactions
         self.N = s.N
         self.interactions_matrix = interactions_matrix
         self.interaction_terms = s.interaction_terms
@@ -36,8 +37,8 @@ class SDM:
         if s.interaction_terms == 0:
             self.test_with_linear_model()  # Test whether analytical solution and numerical solution match
 
-        if s.setting_name == "Sleep" and s.variable_of_interest == "Depressive_symptoms":
-            self.test_with_sleep_depression_model() # Call the test_with_sleep_depression_model function when the class is loaded
+        #if s.setting_name == "Sleep" and s.variable_of_interest == "Depressive_symptoms":
+        #    self.test_with_sleep_depression_model() # Call the test_with_sleep_depression_model function when the class is loaded
 
     def flatten(self, xss):
         return [x for xs in xss for x in xs]
@@ -391,8 +392,18 @@ class SDM:
             current_t = self.t_eval[i + 1]
             previous_t = self.t_eval[i]
             t = current_t
-            linkscores[current_t] = {k : {g : -999 for g in params[k] if g != "Intercept"} for k in params}
-        
+           # linkscores[current_t] = {k : {g : -999 for g in params[k] if g != "Intercept"} for k in params}
+            temp = {k : {g : -999 for g in params[k] if (g != "Intercept") and ("*" not in g)} for k in params}
+
+            # If interaction term, create separate links for the individual terms
+            for output in params:
+                for input in params[output]:
+                    if "*" in input:
+                        input1, input2 = input.split(" * ")
+                        temp[output][input1] = -999
+                        temp[output][input2] = -999
+            linkscores[current_t] = temp
+
             for target in self.stocks_and_auxiliaries:  # For all stocks and auxiliaries
                 target_value = df_i.loc[current_t, target]
                 target_previous_value = df_i.loc[previous_t, target]
@@ -405,18 +416,47 @@ class SDM:
 
                     for run in range(2):
                         for source in linkscores[t][target]:
-                            if "*" in source:  # Interaction term
-                                source_1_previous_value = df_i.loc[previous_t, source.split(" * ")[0]]
-                                source_2_previous_value = df_i.loc[previous_t, source.split(" * ")[1]]
-                                source_1_current_value = df_i.loc[current_t, source.split(" * ")[0]]
-                                source_2_current_value = df_i.loc[current_t, source.split(" * ")[1]]
-                                flow_previous_value = source_1_previous_value * source_2_previous_value * params[target][source]
-                                flow_current_value = source_1_current_value * source_2_current_value * source_current_value * params[target][source]
-                            else:  # Regular term
-                                source_previous_value = df_i.loc[previous_t, source]
-                                source_current_value = df_i.loc[current_t, source]
+                            # Calculate the flow based on main effects
+                            source_previous_value = df_i.loc[previous_t, source]
+                            source_current_value = df_i.loc[current_t, source]
+
+                            if source in params[target]:  # Main effect term is included
                                 flow_previous_value = source_previous_value * params[target][source]
                                 flow_current_value = source_current_value * params[target][source]
+                            else:
+                                flow_previous_value = 0
+                                flow_current_value = 0
+
+                            # Calculate the flow with interaction terms added
+                            terms = list(params[target].keys())  # Get all the right-hand side terms, including interaction terms
+                            for term in [x for x in terms if "*" in x]:  # Loop over interaction terms
+                                if source in term:  # The source is part of an interaction term
+                                    source_1_previous_value = df_i.loc[previous_t, term.split(" * ")[0]]
+                                    source_2_previous_value = df_i.loc[previous_t, term.split(" * ")[1]]
+                                    source_1_current_value = df_i.loc[current_t, term.split(" * ")[0]]
+                                    source_2_current_value = df_i.loc[current_t, term.split(" * ")[1]]
+                                    
+                                    # Add the interaction terms to the flows
+                                    flow_previous_value += source_1_previous_value * source_2_previous_value * params[target][term]
+                                    flow_current_value += source_1_current_value * source_2_current_value * source_current_value * params[target][term]
+
+                                    #input1, input2 = term.split(" * ")
+                                    #temp[out][source] = params[out][term] * input1 * input2
+                                    #if input in terms:  # The input variable also contains a main effect
+                                    #    temp[out][input] += params[out][input] * input
+
+                        #    # if "*" in source:  # Interaction term
+                        #         source_1_previous_value = df_i.loc[previous_t, source.split(" * ")[0]]
+                        #         source_2_previous_value = df_i.loc[previous_t, source.split(" * ")[1]]
+                        #         source_1_current_value = df_i.loc[current_t, source.split(" * ")[0]]
+                        #         source_2_current_value = df_i.loc[current_t, source.split(" * ")[1]]
+                        #         flow_previous_value = source_1_previous_value * source_2_previous_value * params[target][source]
+                        #         flow_current_value = source_1_current_value * source_2_current_value * source_current_value * params[target][source]
+                        #     else:  # Regular term
+                        #         source_previous_value = df_i.loc[previous_t, source]
+                        #         source_current_value = df_i.loc[current_t, source]
+                        #         flow_previous_value = source_previous_value * params[target][source]
+                        #         flow_current_value = source_current_value * params[target][source]
 
                             delta_source = source_current_value - source_previous_value
                             delta_flow = flow_current_value - flow_previous_value
@@ -429,7 +469,7 @@ class SDM:
                                 if sum_of_flows == 0 or sum_of_delta_flows == 0:
                                     linkscores[t][target][source] = 0
                                 else:
-                                    sign = np.sign(params[target][source])  # Determine whether inflow or outflow
+                                    sign = np.sign(flow_current_value) #params[target][source])  # Determine whether inflow or outflow
                                     linkscores[t][target][source] = np.abs(delta_flow / sum_of_delta_flows) * sign
                 
                 elif target_value == target_previous_value:  # No change, thus remains constant
@@ -463,9 +503,11 @@ class SDM:
         """ For each loop, estimate the total loop score which is the multiplication of all the linkscores in the loop 
         """
         # Create a DiGraph from the adjacency matrix
-        G = nx.DiGraph(self.df_adj)
+        G = nx.DiGraph(self.df_adj_incl_interactions)
         feedback_loops = list(nx.simple_cycles(G))
         t_eval_loops = self.t_eval[1:]
+
+        # print("The feedback loops are: ", feedback_loops)
 
         loopscores = {}
         for loop in feedback_loops:
@@ -476,7 +518,8 @@ class SDM:
             for t in t_eval_loops:
                 link_scores_per_loop = []
                 for i in range(len(close_loop)-1):
-                    assert self.df_adj.loc[close_loop[i], close_loop[i+1]] != 0  # There must be a link between the two nodes
+                    assert self.df_adj_incl_interactions.loc[close_loop[i], close_loop[i+1]] != 0  # There must be a link between the two nodes
+                    #assert self.df_adj.loc[close_loop[i], close_loop[i+1]] != 0  # There must be a link between the two nodes
                     link_scores_per_loop += [linkscores[t][close_loop[i]][close_loop[i+1]]]
                 
                 loop_score = np.prod(link_scores_per_loop)
