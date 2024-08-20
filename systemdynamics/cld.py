@@ -13,7 +13,7 @@ class Extract:
         folders = current_path.split('/')
         if folders.count("systemdynamics") > 1:
             current_path = "/".join(current_path.split('/')[:-1])
-        self.current_path
+        self.current_path = current_path
         file_path = os.path.join(current_path, f"{setting_name}.xlsx")
         self.file_path = file_path
         settings_path = os.path.join(current_path, f'{setting_name}.json')
