@@ -15,7 +15,9 @@ setup(
         'networkx >= 2.5',
         'ipywidgets',
         'numexpr>=2.8.4',
-        'bottleneck>=1.3.6'
+        'bottleneck>=1.3.6',
+        #scikit-learn
+        'scikit-learn',
     ],
     entry_points={
         'console_scripts': [

@@ -64,6 +64,28 @@ if __name__ == "__main__":
 
     # Load the adjacency matrix based on the Kumu table
     file = os.path.join(os.path.dirname(__file__), 'Examples',"Kumu", f"{setting_name}.xlsx")
+
+    #########Cleaning the Kumu file#########
+    # Load the Excel file into a DataFrame
+    elements_df = pd.read_excel(file, sheet_name='Elements')
+    connections_df = pd.read_excel(file, sheet_name='Connections')
+
+    # Remove all parentheses and hyphens from the specified columns in the "Elements" sheet
+    elements_df['Label'] = elements_df['Label'].str.replace(r'[()-]/', '', regex=True)
+
+    # Remove all parentheses and hyphens from the specified columns in the "Connections" sheet
+    connections_df['From'] = connections_df['From'].str.replace(r'[()-]/', '', regex=True)
+    connections_df['To'] = connections_df['To'].str.replace(r'[()-]/', '', regex=True)
+
+    # Save the cleaned DataFrame to a new file with the same name plus "clean"
+    cleaned_file = os.path.join(os.path.dirname(__file__), 'Examples', "Kumu", f"{setting_name}_clean.xlsx")
+    with pd.ExcelWriter(cleaned_file, engine='openpyxl') as writer:
+        elements_df.to_excel(writer, sheet_name='Elements', index=False)
+        connections_df.to_excel(writer, sheet_name='Connections', index=False)
+
+    file = cleaned_file
+    ########################################
+
     extract = Extract(file)  # Load the relevant Kumu file extraction module
 
     # Load the adjacency matrix from the KUmu file
@@ -94,7 +116,7 @@ if __name__ == "__main__":
     # Create dataframe with adjacency matrix
     df_adj = pd.DataFrame(adjacency_matrix,
                           columns=s.variables, index=s.variables) 
-
+    
     np.random.seed(s.seed)  # Set seed for reproducibility
 
     # Set the SDM simulation timesteps to store 

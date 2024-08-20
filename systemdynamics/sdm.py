@@ -61,11 +61,57 @@ class SDM:
     
         return intervention_effects
 
-    def sample_model_parameters(self, intervention_auxiliaries=None):
-        """ Sample from the model parameters using a bounded uniform distribution. 
-            The possible parameters are given by the adjacency and interactions matrices.
+#    def sample_model_parameters(self, intervention_auxiliaries=None):
+#        """ Sample from the model parameters using a bounded uniform distribution. 
+#            The possible parameters are given by the adjacency and interactions matrices.
+#        """
+#        params = {var : {} for var in self.stocks_and_auxiliaries}
+#        num_pars = int(self.df_adj.abs().sum().sum())
+#        num_pars_int = int(np.abs(self.interactions_matrix).sum().sum())
+#        sample_pars = np.random.uniform(0, self.max_parameter_value, size=(num_pars))
+#        sample_pars_int = np.random.uniform(0, self.max_parameter_value_int, size=(num_pars_int))
+#
+#        par_int_count = 0
+#        par_count = 0
+#   
+#        for i, var in enumerate(self.variables):
+#            # Intercept
+#            if var in self.stocks_and_auxiliaries:
+#                params[var]["Intercept"] = 0
+#            if self.simulate_interventions:
+#                if var in intervention_auxiliaries:
+#                    if var in self.auxiliaries:
+#                        params[var]["Intercept"] = 1
+#                    else:
+#                        raise Exception("Intervention auxiliary is not an auxiliary variable.")
+#
+#            # Pairwise interactions
+#            for j, var_2 in enumerate(self.variables):
+#                if self.df_adj.loc[var_2, var] != 0:
+#                    params[var_2][var] = self.df_adj.loc[var_2, var] * sample_pars[par_count]
+#                    par_count += 1
+#
+#                # 2nd-order interaction terms
+#                if self.interaction_terms:
+#                    for k, var_3 in enumerate(self.variables):
+#                        if self.interactions_matrix[k, j, i] != 0:
+#                            params[var_3] = {}
+#                            params[var_3][var_2 + " * " + var] = self.interactions_matrix[k, j, i] * sample_pars_int[par_int_count]
+#                            par_int_count += 1
+#        self.params = params
+#        return params
+    
+    def sample_model_parameters(self, intervention_auxiliaries=None, intervention_stocks=None):
+        """Sample from the model parameters using a bounded uniform distribution.
+        The possible parameters are given by the adjacency and interactions matrices.
         """
-        params = {var : {} for var in self.stocks_and_auxiliaries}
+        # If no arguments are passed, default to empty lists
+        if intervention_auxiliaries is None:
+            intervention_auxiliaries = []
+        if intervention_stocks is None:
+            intervention_stocks = []
+
+        params = {var: {} for var in self.stocks_and_auxiliaries}
         num_pars = int(self.df_adj.abs().sum().sum())
         num_pars_int = int(np.abs(self.interactions_matrix).sum().sum())
         sample_pars = np.random.uniform(0, self.max_parameter_value, size=(num_pars))
@@ -73,19 +119,34 @@ class SDM:
 
         par_int_count = 0
         par_count = 0
-    
+
+        # Determine the total number of interventions
+        total_interventions = len(intervention_auxiliaries) + len(intervention_stocks)
+
         for i, var in enumerate(self.variables):
-            # Intercept
+            # Initialize the Intercept if the variable is a stock or auxiliary
             if var in self.stocks_and_auxiliaries:
                 params[var]["Intercept"] = 0
-            if self.simulate_interventions:
-                if var in intervention_auxiliaries:
-                    if var in self.auxiliaries:
-                        params[var]["Intercept"] = 1
-                    else:
-                        raise Exception("Intervention auxiliary is not an auxiliary variable.")
 
-            # Pairwise interactions
+            # Apply interventions if necessary
+            if self.simulate_interventions and (intervention_auxiliaries or intervention_stocks):
+                if var in intervention_auxiliaries or var in intervention_stocks:
+                    if var in self.auxiliaries:  # Only modify intercept for auxiliaries
+                        if total_interventions == 2:
+                            params[var]["Intercept"] = 0.5
+                        else:
+                            params[var]["Intercept"] = 1
+                    elif var in self.stocks_and_constants:
+                        if var in self.stocks_and_auxiliaries:  # Ensure the variable is in stocks and auxiliaries
+                            if total_interventions == 2:
+                                params[var]["Intercept"] = 0.5
+                            else:
+                                params[var]["Intercept"] = 1
+                        else:
+                            # Handle constants differently if necessary, or skip them
+                            pass
+
+            # Handle pairwise interactions
             for j, var_2 in enumerate(self.variables):
                 if self.df_adj.loc[var_2, var] != 0:
                     params[var_2][var] = self.df_adj.loc[var_2, var] * sample_pars[par_count]
@@ -98,11 +159,13 @@ class SDM:
                             params[var_3] = {}
                             params[var_3][var_2 + " * " + var] = self.interactions_matrix[k, j, i] * sample_pars_int[par_int_count]
                             par_int_count += 1
+
         self.params = params
         return params
 
+
     def make_equations_auxiliary_independent(self): #, params):
-        """" Create independent equations without auxiliaries.
+        """ Create independent equations without auxiliaries.
         Input: parameter dictionary with auxiliary terms
         Output: parameter dictionary without auxiliary terms (i.e., only in terms of stocks and constants)
         """

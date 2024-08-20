@@ -1,4 +1,6 @@
 Examples/Results/
+social_license_*
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
