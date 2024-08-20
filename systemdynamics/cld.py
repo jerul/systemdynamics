@@ -10,15 +10,13 @@ from openpyxl import load_workbook
 class Extract:
     def __init__(self, setting_name):
         current_path = os.getcwd()
-        #folders = current_path.split('/')
-        # if "tutorials" in current_path or folders.count("systemdynamics") > 1:
-        #     current_path = "/".join(current_path.split('/')[:-1])
+        folders = current_path.split('/')
+        if folders.count("systemdynamics") > 1:
+            current_path = "/".join(current_path.split('/')[:-1])
+        self.current_path
         file_path = os.path.join(current_path, f"{setting_name}.xlsx")
-
         self.file_path = file_path
-        #settings_path = os.path.join(os.path.dirname(__file__), f'{setting_name}.json')
         settings_path = os.path.join(current_path, f'{setting_name}.json')
-        #os.path.join(os.path.dirname(__file__), 'Examples','Settings', f'{self.setting_name}.json')
         self.setting_name = setting_name
         self.settings_path = settings_path
         self.variables = []
@@ -26,7 +24,6 @@ class Extract:
         self.adjacency_matrix = None
         self.interactions_matrix = None
         self.get_settings() # Get settings from the json file
-
         self.test_extraction()  # Call the test_extraction function when the class is loaded
 
     def get_settings(self):
@@ -39,7 +36,7 @@ class Extract:
         curr_time = (str(datetime.datetime.now())[0:10])  # Create a new folder for each date
 
         if s.save_results:  # Create a directory to store results
-            folder_path = os.path.join(os.getcwd(),"Results", f"{curr_time}_{self.setting_name}")
+            folder_path = os.path.join(self.current_path,"Results", f"{curr_time}_{self.setting_name}")
             
             if not os.path.exists(folder_path):
                 os.mkdir(folder_path)
@@ -122,13 +119,6 @@ class Extract:
         s.interactions_matrix = interactions_matrix # Save the interactions matrix to the settings
 
         # Add the interactions to the adjacency matrix for the identification of feedback loops with interaction terms
-        # s.df_adj_incl_interactions = s.df_adj + pd.DataFrame(s.interactions_matrix.sum(axis=0),
-        #                                                      index=s.variables, columns=s.variables)
-        # s.df_adj_incl_interactions += pd.DataFrame(s.interactions_matrix.sum(axis=1),
-        #                                            index=s.variables, columns=s.variables)
-        # s.df_adj_incl_interactions[s.df_adj_incl_interactions > 1] = 1
-        # s.df_adj_incl_interactions[s.df_adj_incl_interactions < -1] = -1
-
         s.df_adj_incl_interactions = s.df_adj.copy()
         to_list, from1_list, from2_list = np.nonzero(s.interactions_matrix)
         for i in range(int(np.abs(s.interactions_matrix).sum())):
