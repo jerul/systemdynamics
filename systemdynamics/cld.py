@@ -4,6 +4,8 @@ import numpy as np
 import os
 import datetime
 import json
+import warnings
+
 from types import SimpleNamespace
 from openpyxl import load_workbook
 
@@ -103,8 +105,8 @@ class Extract:
 
         # If double factor interventions selected, add double factor interventions 
         if s.double_factor_interventions and s.interaction_terms == False:
-            print("Without interaction terms, double factor interventions are not meaningful. Setting double_factor_interventions to False.")
-            s.double_factor_interventions = 0
+            warnings.warn("Without interaction terms, double factor interventions are not meaningful. Consider setting double_factor_interventions to False.")
+            #s.double_factor_interventions = 0
 
         if s.double_factor_interventions:
             double_intervention_variables = []
