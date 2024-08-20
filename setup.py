@@ -12,6 +12,7 @@ setup(
         'scipy',
         'tqdm',
         'sympy',
+        'networkx',
         'networkx >= 2.5',
         'ipywidgets',
         'numexpr>=2.8.4',

@@ -9,9 +9,15 @@ from openpyxl import load_workbook
 
 class Extract:
     def __init__(self, setting_name):
-        file_path = os.path.join(os.path.dirname(__file__), 'Examples',"Kumu", f"{setting_name}.xlsx")
+        current_path = os.getcwd()
+        #folders = current_path.split('/')
+        # if "tutorials" in current_path or folders.count("systemdynamics") > 1:
+        #     current_path = "/".join(current_path.split('/')[:-1])
+        file_path = os.path.join(current_path, f"{setting_name}.xlsx")
+
         self.file_path = file_path
-        settings_path = os.path.join(os.path.dirname(__file__), f'{setting_name}.json')
+        #settings_path = os.path.join(os.path.dirname(__file__), f'{setting_name}.json')
+        settings_path = os.path.join(current_path, f'{setting_name}.json')
         #os.path.join(os.path.dirname(__file__), 'Examples','Settings', f'{self.setting_name}.json')
         self.setting_name = setting_name
         self.settings_path = settings_path

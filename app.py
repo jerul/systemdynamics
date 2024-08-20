@@ -1,21 +1,10 @@
 import streamlit as st
-import numpy as np
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
 from types import SimpleNamespace
 import json
-from tqdm import tqdm 
-import sys
-import os
-import datetime
-import scipy
-import subprocess
-from copy import deepcopy
 from systemdynamics.cld import Extract
 from systemdynamics.sdm import SDM
-from systemdynamics.plots import plot_simulated_interventions, plot_simulated_intervention_ranking, plot_simulated_data
-from systemdynamics.plots import plot_simulated_interventions_compare, plot_feedback_loops_ranking, plot_feedback_loops_over_time, plot_feedback_loops_over_time_bounds
+from systemdynamics.plots import plot_simulated_interventions, plot_simulated_intervention_ranking
+from systemdynamics.plots import plot_feedback_loops_ranking, plot_feedback_loops_over_time
 
 st.title('Diagrams to Dynamics: A System Dynamics Analysis of a Causal Loop Diagram')
 

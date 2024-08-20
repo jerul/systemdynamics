@@ -31,8 +31,8 @@ Replace <setting_name> with the appropriate setting, such as 'Sleep'.
 Here is an example of how you might run the initialization script:
 
 ```sh
-cd path/to/Examples
-python ../initialize.py Sleep None
+cd user/systemdynamics
+python initialize.py Sleep 
 ```
 
 Make sure to adjust the path to Examples based on your directory structure and that initialize.py is the same directory as the Examples folder.
