@@ -21,8 +21,8 @@ pip install .
 ### Running the Package
 To run the package, from the Examples directory, use the following command:
 ```sh
-cd path/to/Examples
-python ../initialize.py <setting_name> <None>
+cd path
+python initialize.py <setting_name>
 ```
 
 Replace <setting_name> with the appropriate setting, such as 'Sleep'.

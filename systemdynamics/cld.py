@@ -1,17 +1,48 @@
 import os
 import pandas as pd
 import numpy as np
+import os
+import datetime
+import json
+from types import SimpleNamespace
 from openpyxl import load_workbook
 
 class Extract:
-    def __init__(self, s, file_path):
+    def __init__(self, setting_name):
+        file_path = os.path.join(os.path.dirname(__file__), 'Examples',"Kumu", f"{setting_name}.xlsx")
         self.file_path = file_path
+        settings_path = os.path.join(os.path.dirname(__file__), f'{setting_name}.json')
+        #os.path.join(os.path.dirname(__file__), 'Examples','Settings', f'{self.setting_name}.json')
+        self.setting_name = setting_name
+        self.settings_path = settings_path
         self.variables = []
         self.var_to_type = {}
         self.adjacency_matrix = None
         self.interactions_matrix = None
-        self.s = s
+        self.get_settings() # Get settings from the json file
+
         self.test_extraction()  # Call the test_extraction function when the class is loaded
+
+    def get_settings(self):
+        """ Get the settings from the json file
+        """
+        with open(self.settings_path) as f:
+            settings = json.load(f)
+        s = SimpleNamespace(**settings)
+        s.setting_name = self.setting_name
+        curr_time = (str(datetime.datetime.now())[0:10])  # Create a new folder for each date
+
+        if s.save_results:  # Create a directory to store results
+            folder_path = os.path.join(os.getcwd(),"Results", f"{curr_time}_{self.setting_name}")
+            
+            if not os.path.exists(folder_path):
+                os.mkdir(folder_path)
+
+            with open(os.path.join(folder_path, f"used_settings_{self.setting_name}.json"), 'w+') as f:
+                json.dump(settings, f, indent=2)  # Store current settings
+
+            s.save_path = os.path.join("Results", curr_time + '_' + self.setting_name + "/")  # Path for saving the results
+        self.s = s
 
     def extract_settings(self):
         """ Extract all settings based on the json and Kumu files
