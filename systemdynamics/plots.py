@@ -131,6 +131,9 @@ def plot_simulated_interventions(s, df_sol_per_sample, intervention_effects, int
     """
     Plot the simulated interventions over time
     """
+    if top_plot != None:
+        top_plot = min(top_plot or len(intervention_effects), len(intervention_effects))
+    
     df_sol_per_sample_reordered = df_sol_per_sample.copy()
     top_vars_plot = list(intervention_effects.keys())[:top_plot]
 
@@ -154,10 +157,14 @@ def plot_simulated_interventions(s, df_sol_per_sample, intervention_effects, int
     fig.suptitle("Simulated interventions with N="+ str(s.N) + " samples")
     ax = axs.flatten()
 
+
+
     #max_value = max([max([df_sol_per_sample[i][j][s.variable_of_interest].max() for i in range(s.N)]) for j in range(len(s.intervention_variables))])
     #min_value = min([min([df_sol_per_sample[i][j][s.variable_of_interest].min() for i in range(s.N)]) for j in range(len(s.intervention_variables))])
 
-    for k, var in enumerate(s.intervention_variables):
+    for k, var in enumerate(top_vars_plot):
+        if k >= len(ax):
+            break  # Prevent index out of bounds
         if interval_type != "spaghetti":
             avg_at_time_t = []
             lb_confs_at_time_t = []
@@ -203,9 +210,9 @@ def plot_simulated_interventions(s, df_sol_per_sample, intervention_effects, int
         if k == 0:
             ax[k].legend()
 
-    # Hide unused subplot space
-    for b in range(num_rows * 3 - num_plots):
-        ax[num_plots + b].axis('off')
+    # Hide unused subplots
+    for b in range(num_plots, len(ax)):
+        ax[b].axis('off')
 
     plt.tight_layout()
 
@@ -214,6 +221,48 @@ def plot_simulated_interventions(s, df_sol_per_sample, intervention_effects, int
         plt.savefig(s.save_path + title, format='jpg', dpi=300, bbox_inches='tight')
 
     return fig
+
+
+def plot_simulated_intervention(s, intervention_effects, interventions_to_plot=None):
+    """ 
+    Plot simulated intervention effects in a horizontal boxplot, ranked by median.
+    """
+    # Convert intervention effects to DataFrame
+    df_SA = pd.DataFrame(intervention_effects)
+
+    # If a specific list of interventions is provided, filter the DataFrame
+    if interventions_to_plot is not None:
+        df_SA = df_SA[interventions_to_plot]
+
+    # Rename columns for readability (optional) - replace underscores with spaces
+    df_SA = df_SA.rename(columns=lambda x: x.replace('_', ' '))
+
+    # Define color palette
+    palette_dict = {var: "#4682B4" for var in df_SA.columns}  # Blue for positive effects
+    medians = df_SA.median()
+    lower_than_zero_vars = medians.loc[medians < 0].index
+    for var in lower_than_zero_vars:
+        palette_dict[var] = "#FF6347"  # Red for negative effects
+    palette = list(palette_dict.values())  # Convert to list
+
+    # Take the absolute values for plotting
+    df_SA = df_SA.abs()
+
+    # Plotting
+    fig = plt.figure(figsize=(5, 8))
+    ax = fig.add_subplot(111)
+    sns.boxplot(data=df_SA, showfliers=False, whis=True, orient='h', palette=palette)
+    plt.vlines(x=0, ymin=-0.5, ymax=len(df_SA.columns) - 0.6, colors='black', linestyles='dashed')
+    plt.title("Effect on " + " ".join(s.variable_of_interest.split("_")))
+    plt.xlabel("Standardized effect after " + str(s.t_end) + " " + s.time_unit)
+    plt.ylabel("")
+    
+    if s.save_results:
+        title = 'simulated_interventions_ranking_plots_per_individual_N' + str(s.N) + '.jpg'
+        plt.savefig(s.save_path + title, format='jpg', dpi=300, bbox_inches='tight')
+
+    return fig
+
 
 def plot_simulated_intervention_ranking(s, intervention_effects, top_plot=None):
    """ Plot simulated intervention effects in a horizontal boxplot, ranked by median.
