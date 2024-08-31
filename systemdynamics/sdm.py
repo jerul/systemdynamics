@@ -85,7 +85,7 @@ class SDM:
         """ Run the simulations for N iterations for all the specified interventions
         """
         df_sol_per_sample = []  # List for storing the solution dataframes
-        df_sol_per_sample_no_int = []   # List for storuing the solution dataframes without interventions
+        #df_sol_per_sample_no_int = []   # List for storuing the solution dataframes without interventions
         param_samples = {var : {} for var in self.intervention_variables}  # Dictionary for storing the parameters across samples
 
         for num in tqdm(range(self.N)):  # Iterate over the number of samples
@@ -96,7 +96,7 @@ class SDM:
             for i, var in enumerate(self.intervention_variables):
                 # Set the initial condition for the stocks to zero
                 x0 = np.zeros(len(self.stocks_and_constants), order='F')  # By default no intervention on a stock or constant (initialized in equilibrium)
-                intervention_auxiliaries = {}  # By default no intervention on an auxiliary
+                #intervention_auxiliaries = {}  # By default no intervention on an auxiliary
                 params = deepcopy(params_i)  # Copy the parameters to avoid overwriting the original parameters
 
                 if '+' in var:  # Double factor intervention
@@ -151,6 +151,21 @@ class SDM:
 
         self.intervention_effects = intervention_effects
         return intervention_effects
+
+    def get_top_interventions(intervention_effects, top_plot=None):
+        """ Get the names of the top interventions based on median effect. """
+        # Convert intervention effects to DataFrame
+        df_SA = pd.DataFrame(intervention_effects)
+        
+        # Sort interventions by the absolute median of their effects
+        sorted_columns = df_SA.abs().median().sort_values(ascending=False).index
+        
+        # If top_plot is specified, limit to the top X interventions
+        if top_plot is not None:
+            sorted_columns = sorted_columns[:top_plot]
+        
+        # Return the original column names exactly as they are
+        return list(sorted_columns)
 
     def run_loops_that_matter(self, int_var=None): 
         """ Calculate link and loop scores for all samples using the Loops That Matter method

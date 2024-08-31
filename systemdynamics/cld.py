@@ -4,6 +4,8 @@ import numpy as np
 import os
 import datetime
 import json
+import warnings
+
 from types import SimpleNamespace
 from openpyxl import load_workbook
 
@@ -65,9 +67,9 @@ class Extract:
                 s.interaction_terms = False
     
         # Load variable names and automatically fill any spaces with underscores
-        s.stocks = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var] == 'stock']
-        s.auxiliaries = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var] == 'auxiliary']
-        s.constants = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var] == 'constant']
+        s.stocks = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var].lower() == 'stock']
+        s.auxiliaries = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var].lower() == 'auxiliary']
+        s.constants = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var].lower() == 'constant']
         s.variables = [var.replace(" ", "_") for var in variable_names]  # s.auxiliaries + s.stocks + s.constants
         s.stocks_and_constants = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var] in ['stock', 'constant']]
         s.stocks_and_auxiliaries = [var.replace(" ", "_") for var in variable_names if var_to_type_init[var] in ['stock', 'auxiliary']]
@@ -102,9 +104,9 @@ class Extract:
         s.intervention_variables = [var for var in s.variables if var != s.variable_of_interest]  
 
         # If double factor interventions selected, add double factor interventions 
-        if s.double_factor_interventions and s.interaction_terms == False:
-            print("Without interaction terms, double factor interventions are not meaningful. Setting double_factor_interventions to False.")
-            s.double_factor_interventions = 0
+        #if s.double_factor_interventions and s.interaction_terms == False:
+            #warnings.warn("Without interaction terms, double factor interventions are not meaningful. Consider setting double_factor_interventions to False.")
+            #s.double_factor_interventions = 0
 
         if s.double_factor_interventions:
             double_intervention_variables = []
@@ -178,14 +180,18 @@ class Extract:
     def extract_interactions_matrix(self):
         """Extract the interactions matrix from the 'Interactions' sheet in the Kumu Excel file."""
         wb = load_workbook(self.file_path, read_only=True)   # open an Excel file and return a workbook
+        
+        # Create an empty matrix to annotate interactions
+        num_variables = len(self.variables)
+        self.interactions_matrix = np.zeros((num_variables, num_variables, num_variables))
 
         if 'Interactions' in wb.sheetnames:
             df_i = pd.read_excel(self.file_path, sheet_name="Interactions")
             df_i = df_i[["From1", "From2", "Type", "To"]]
 
             # Create an empty matrix to annotate interactions
-            num_variables = len(self.variables)
-            self.interactions_matrix = np.zeros((num_variables, num_variables, num_variables))
+            #num_variables = len(self.variables)
+            #self.interactions_matrix = np.zeros((num_variables, num_variables, num_variables))
 
             # Populate the interactions matrix
             for i, origin_1 in enumerate(df_i["From1"]):
