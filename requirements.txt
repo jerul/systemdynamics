@@ -1,12 +1,12 @@
 pandas>=1.3.0
 openpyxl>=3.1.0
+matplotlib>=3.5.0
 seaborn>=0.11.0
-xlsxwriter>=3.0.5
 scipy
+networkx>=2.5
+jax
+diffrax
 tqdm
-sympy
-networkx 
 ipywidgets
-numexpr>=2.8.4
-bottleneck>=1.3.6
 tabulate>=0.8.9
+streamlit>=1.30.0

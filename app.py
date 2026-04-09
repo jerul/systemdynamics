@@ -1,118 +1,234 @@
-import streamlit as st
-from tempfile import TemporaryDirectory
-import os
-from systemdynamics.cld import Extract
-from systemdynamics.sdm import SDM
-from systemdynamics.plots import plot_simulated_intervention_ranking
-import sys
 import io
-st.title('Diagrams-to-Dynamics (D2D): Exploring Causal Loop Diagram Leverage Points under Uncertainty')
+import os
+import sys
+from tempfile import TemporaryDirectory
 
-# Upload file
-uploaded_kumu_excel = st.file_uploader("Upload an Excel file (xlsx)", type="xlsx")
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy.stats
+import streamlit as st
 
-# Input fields (values stored but simulation doesn't run immediately)
-# Initialize session state variables if they don't exist
-if "N" not in st.session_state:
-    st.session_state.N = "100"
-if "time_unit" not in st.session_state:
-    st.session_state.time_unit = "Months"
-if "t_end" not in st.session_state:
-    st.session_state.t_end = "12"
-if "parameter_value_aux" not in st.session_state:
-    st.session_state.parameter_value_aux = "0.3"
-if "parameter_value_stocks" not in st.session_state:
-    st.session_state.parameter_value_stocks = "0.1" 
-if "seed" not in st.session_state:
-    st.session_state.seed = "1912884"
-if "cut_off_SA_importance" not in st.session_state:
-    st.session_state.cut_off_SA_importance = "0.1"
-if "double_factor_interventions_setting" not in st.session_state:
-    st.session_state.double_factor_interventions_setting = "0"
+from funcs.cld import Extract
+from funcs.d2d import D2D
+from funcs.plots import plot_simulated_intervention_ranking
 
-# User inputs linked to session state
-N = st.text_input("Enter the number of simulations to run (default 100)", st.session_state.N)
-time_unit = st.text_input("Enter the base unit of time", st.session_state.time_unit)
-t_end = st.text_input("Enter the final simulation time point", st.session_state.t_end)
-parameter_value_aux = st.text_input("Enter the max parameter value for auxiliaries", st.session_state.parameter_value_aux)
-parameter_value_stocks = st.text_input("Enter the max parameter value for stocks", st.session_state.parameter_value_stocks)
-seed = st.text_input("Enter a seed for reproducibility (leave blank for random)", st.session_state.seed)
-cut_off_SA_importance = st.text_input("Enter a cut-off for sensitivity coefficients to print (default rho>=0.1)", st.session_state.cut_off_SA_importance)
-double_factor_interventions_setting = st.text_input("If you have interaction terms, do you want to simulate interventions on two factors simultaneously: 0=no, 1=yes (default: 0)?", st.session_state.double_factor_interventions_setting)
+# ---------------------------------------------------------------------------
+# Page config
+# ---------------------------------------------------------------------------
+st.set_page_config(
+    page_title="Diagrams-to-Dynamics (D2D)",
+    layout="wide",
+)
+st.title("Diagrams-to-Dynamics (D2D)")
+st.caption("Exploring Causal Loop Diagram leverage points under uncertainty")
 
-# Update session state when user changes input
-if N != st.session_state.N:
-    st.session_state.N = N
-if time_unit != st.session_state.time_unit:
-    st.session_state.time_unit = time_unit
-if t_end != st.session_state.t_end:
-    st.session_state.t_end = t_end
-if parameter_value_aux != st.session_state.parameter_value_aux:
-    st.session_state.parameter_value_aux = parameter_value_aux
-if parameter_value_stocks != st.session_state.parameter_value_stocks:
-    st.session_state.parameter_value_stocks = parameter_value_stocks
-if seed != st.session_state.seed:
-    st.session_state.seed = seed
-if cut_off_SA_importance != st.session_state.cut_off_SA_importance:
-    st.session_state.cut_off_SA_importance = cut_off_SA_importance
-if double_factor_interventions_setting != st.session_state.double_factor_interventions_setting:
-    st.session_state.double_factor_interventions_setting = double_factor_interventions_setting
+# ---------------------------------------------------------------------------
+# Sidebar: simulation settings
+# ---------------------------------------------------------------------------
+with st.sidebar:
+    st.header("Simulation settings")
+    N = st.number_input("Number of simulations", value=100, min_value=10, step=10)
+    t_end = st.number_input("Final time point", value=20, min_value=1, step=1)
+    time_unit = st.text_input("Time unit", value="Months")
+    parameter_value_aux = st.number_input(
+        "Max parameter value – auxiliaries", value=0.3, min_value=0.0, step=0.05, format="%.3f"
+    )
+    parameter_value_stocks = st.number_input(
+        "Max parameter value – stocks", value=0.1, min_value=0.0, step=0.05, format="%.3f"
+    )
+    seed = st.number_input("Random seed", value=1912884, step=1)
+    double_factor = st.checkbox(
+        "Simulate double-factor interventions (requires interaction terms)", value=False
+    )
+    cut_off_SA = st.number_input(
+        "Sensitivity analysis |ρ| cutoff", value=0.1, min_value=0.0, max_value=1.0,
+        step=0.01, format="%.2f"
+    )
 
-# Button to confirm and run the simulation
-if st.button("Run Simulation") and uploaded_kumu_excel is not None:
-    with TemporaryDirectory() as temp_dir:
-        file_path = os.path.join(temp_dir, uploaded_kumu_excel.name)
+# ---------------------------------------------------------------------------
+# File upload + run
+# ---------------------------------------------------------------------------
+uploaded = st.file_uploader("Upload your Kumu Excel file (.xlsx)", type="xlsx")
 
+run_clicked = st.button("Run simulation", type="primary", disabled=uploaded is None)
+
+if run_clicked and uploaded is not None:
+    with TemporaryDirectory() as tmp:
+        file_path = os.path.join(tmp, uploaded.name)
         with open(file_path, "wb") as f:
-            f.write(uploaded_kumu_excel.getvalue())
+            f.write(uploaded.getvalue())
 
-        double_factor_interventions_setting_ = int(double_factor_interventions_setting) # Convert to boolean
+        with st.spinner("Extracting CLD…"):
+            extract = Extract(file_path)
+            s = extract.extract_settings(int(double_factor))
 
-        # Process files
-        extract = Extract(file_path)
-        s = extract.extract_settings(double_factor_interventions_setting_)
-
-        # Convert inputs
         s.N = int(N)
         s.t_end = int(t_end)
         s.time_unit = time_unit
         s.parameter_value_aux = float(parameter_value_aux)
         s.parameter_value_stocks = float(parameter_value_stocks)
-        s.prior = "uniform"
-        s.seed = int(seed) if seed.strip() else None
+        s.seed = int(seed)
+        s.interval_type = "percentile"
 
-        sdm = SDM(s)
-        st.session_state.s = s
-        st.session_state.sdm = sdm
+        sdm = D2D(s)
 
-        # Run simulations
-        st.subheader("Simulated Intervention Rankings")
-
-        df_sol, param_samples = sdm.run_simulations()
+        with st.spinner(f"Running {int(N)} simulations…"):
+            df_sol, param_samples = sdm.run_simulations()
 
         intervention_effects_per_voi = sdm.get_intervention_effects()
 
+        # Cache everything; from here on only widgets trigger reruns
+        st.session_state.s = s
+        st.session_state.sdm = sdm
         st.session_state.df_sol = df_sol
         st.session_state.param_samples = param_samples
         st.session_state.intervention_effects = intervention_effects_per_voi
 
-        # Display results
-        for voi in s.variable_of_interest:
-            fig_var_rank = plot_simulated_intervention_ranking(s, intervention_effects_per_voi[voi], voi)
-            st.pyplot(fig_var_rank)
+# ---------------------------------------------------------------------------
+# Results (shown whenever session_state has data, survives widget reruns)
+# ---------------------------------------------------------------------------
+if "df_sol" not in st.session_state:
+    st.info("Upload a Kumu Excel file and click **Run simulation** to begin.")
+    st.stop()
 
-    # Sensitivity Analysis
-    int_var = None
-    st.subheader("Sensitivity Analysis Results")
+s = st.session_state.s
+sdm = st.session_state.sdm
+df_sol = st.session_state.df_sol
+intervention_effects_per_voi = st.session_state.intervention_effects
 
-    for voi in s.variable_of_interest:
-        st.write(f"**Variable of Interest: {voi}**")  # Display VOI in bold
-        # Capture print output
-        output_buffer = io.StringIO()
-        sys.stdout = output_buffer  # Redirect print statements to buffer
-        SA_results, df_SA = sdm.run_SA(voi, int_var, float(cut_off_SA_importance))
-        sys.stdout = sys.__stdout__  # Reset stdout to normal
-    
-        # Display captured output in Streamlit
-        st.text(output_buffer.getvalue()) 
+# ---------------------------------------------------------------------------
+# 1. Intervention ranking
+# ---------------------------------------------------------------------------
+st.subheader("Intervention rankings")
+for voi in s.variable_of_interest:
+    fig = plot_simulated_intervention_ranking(s, intervention_effects_per_voi[voi], voi)
+    st.pyplot(fig)
+    plt.close(fig)
 
+st.divider()
+
+# ---------------------------------------------------------------------------
+# 2. Interactive compare plot (ipywidgets → Streamlit native controls)
+#
+# Streamlit reruns the whole script whenever a widget changes.  The simulation
+# results stay in st.session_state, so only the figure is re-drawn — cheap.
+# ---------------------------------------------------------------------------
+st.subheader("Compare interventions over time")
+
+col_left, col_right = st.columns([1, 2])
+with col_left:
+    default_outcome = (
+        s.variable_of_interest[0]
+        if s.variable_of_interest and s.variable_of_interest[0] in s.stocks_and_auxiliaries
+        else s.stocks_and_auxiliaries[0]
+    )
+    outcome_var = st.selectbox(
+        "Outcome variable",
+        options=s.stocks_and_auxiliaries,
+        index=s.stocks_and_auxiliaries.index(default_outcome),
+    )
+    selected_interventions = st.multiselect(
+        "Interventions to compare",
+        options=s.intervention_variables,
+        default=s.intervention_variables[:min(2, len(s.intervention_variables))],
+    )
+    interval_type = st.radio(
+        "Interval type",
+        options=["percentile", "spaghetti"],
+        horizontal=True,
+    )
+    confidence_bounds = st.slider(
+        "Interval width",
+        min_value=0.50, max_value=0.99, value=0.95, step=0.01,
+        disabled=(interval_type == "spaghetti"),
+    )
+
+with col_right:
+    if not selected_interventions:
+        st.info("Select at least one intervention.")
+    else:
+        fig, ax = plt.subplots(figsize=(9, 4))
+
+        for k, var in enumerate(selected_interventions):
+            try:
+                int_idx = s.intervention_variables.index(var)
+            except ValueError:
+                continue
+
+            if outcome_var not in df_sol[0][int_idx].columns:
+                continue
+
+            t_eval = df_sol[0][int_idx].index.values
+            label = " ".join(var.split("_"))
+            color = f"C{k}"
+
+            if interval_type == "spaghetti":
+                for n in range(s.N):
+                    ax.plot(
+                        df_sol[n][int_idx].index,
+                        df_sol[n][int_idx][outcome_var],
+                        alpha=0.15, color=color,
+                        label=label if n == 0 else "",
+                    )
+            else:
+                avg, lb, ub = [], [], []
+                for t in t_eval:
+                    samples = np.array(
+                        [df_sol[n][int_idx].loc[t, outcome_var] for n in range(s.N)],
+                        dtype=float,
+                    )
+                    if interval_type == "confidence":
+                        mean = np.nanmean(samples)
+                        h = (scipy.stats.sem(samples, nan_policy="omit")
+                             * scipy.stats.t.ppf((1 + confidence_bounds) / 2.0, s.N - 1))
+                        avg.append(mean)
+                        lb.append(mean - h)
+                        ub.append(mean + h)
+                    else:  # percentile
+                        lo_pct = (1 - confidence_bounds) / 2 * 100
+                        hi_pct = (1 + confidence_bounds) / 2 * 100
+                        avg.append(np.nanmedian(samples))
+                        lb.append(np.nanpercentile(samples, lo_pct))
+                        ub.append(np.nanpercentile(samples, hi_pct))
+
+                pct = int(confidence_bounds * 100)
+                ax.plot(t_eval, avg, label=label, color=color)
+                ax.fill_between(
+                    t_eval, lb, ub, alpha=0.25, color=color,
+                    label=f"{pct}% {interval_type} interval" if k == 0 else "",
+                )
+
+        ax.set_xlabel(getattr(s, "time_unit", "Time"))
+        ax.set_ylabel(" ".join(outcome_var.split("_")))
+        ax.legend()
+        fig.tight_layout()
+        st.pyplot(fig)
+        plt.close(fig)
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# 3. Pairwise comparison table
+# ---------------------------------------------------------------------------
+st.subheader("Pairwise intervention comparison")
+for voi in s.variable_of_interest:
+    st.write(f"**Variable of interest: {voi}**")
+    buf = io.StringIO()
+    sys.stdout = buf
+    sdm.compare_interventions_table(intervention_effects_per_voi[voi])
+    sys.stdout = sys.__stdout__
+    st.code(buf.getvalue(), language="")
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# 4. Sensitivity analysis
+# ---------------------------------------------------------------------------
+st.subheader("Sensitivity analysis")
+for voi in s.variable_of_interest:
+    st.write(f"**Variable of interest: {voi}**")
+    buf = io.StringIO()
+    sys.stdout = buf
+    SA_results, df_SA = sdm.run_SA(voi, None, float(cut_off_SA))
+    sys.stdout = sys.__stdout__
+    st.code(buf.getvalue(), language="")
